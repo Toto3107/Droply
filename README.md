@@ -212,7 +212,7 @@ MIT — use it, fork it, build on it.
 
 ## Built by
 
-[@YOUR_LINKEDIN] — built this to solve a real frustration: sending large files to someone in the same room while burning mobile data. Turns out there's no clean cross-platform answer. droply is the attempt.
+www.linkedin.com/in/mayank-gehlot-28b0381ba — built this to solve a real frustration: sending large files to someone in the same room while burning mobile data. Turns out there's no clean cross-platform answer. droply is the attempt.
 
 **If you find this useful, star the repo ⭐ — it helps more than you'd think.**
 ---
