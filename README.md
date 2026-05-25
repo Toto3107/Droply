@@ -77,7 +77,7 @@ droply's approach: **only the sender installs anything.** The receiver just open
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/droply.git
+git clone https://github.com/Toto3107/droply.git
 cd droply
 
 # Install dependencies
@@ -94,7 +94,7 @@ You'll see:
   droply — local file transfer server
 ══════════════════════════════════════════════════════════
   URL  : http://192.168.1.42:5000
-  PIN  : 847291  ← share this with receivers
+  PIN  : [------]  ← share this with receivers
   HTTPS: no (http only)
   Max file size: 10 GB
 ══════════════════════════════════════════════════════════
@@ -132,7 +132,8 @@ droply/
 ├── logs/                ← transfer logs (gitignored)
 └── templates/
     ├── index.html       ← file browser UI (sender + receiver)
-    └── login.html       ← PIN entry page
+    └── login.html
+    └──  receive.html  ← PIN entry page
 ```
 
 ---
@@ -190,7 +191,7 @@ This is an early prototype and contributions are very welcome — especially:
 
 ```bash
 # Fork the repo, then:
-git clone https://github.com/YOUR_USERNAME/droply.git
+git clone https://github.com/Toto3107/droply.git
 cd droply
 pip install -r requirements.txt
 
