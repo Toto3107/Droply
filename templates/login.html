@@ -4,252 +4,225 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>droply — enter PIN</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg: #0a0a0f;
-      --surface: #13131a;
-      --border: #1e1e2e;
-      --accent: #7c6aff;
-      --accent-dim: #4a3faa;
-      --text: #e8e6f0;
-      --muted: #6b6880;
-      --error: #ff6b6b;
-      --mono: 'DM Mono', monospace;
-      --sans: 'Syne', sans-serif;
+      --bg: #0a0a0f; --surface: #13131a; --border: #1e1e2e;
+      --accent: #7c6aff; --accent-dim: #4a3faa;
+      --text: #e8e6f0; --muted: #6b6880; --error: #ff6b6b;
+      --mono: 'DM Mono', monospace; --sans: 'Syne', sans-serif;
     }
-
     body {
-      font-family: var(--sans);
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem;
+      font-family: var(--sans); background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 2rem;
     }
-
-    /* Subtle grid background */
     body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
+      content: ''; position: fixed; inset: 0;
       background-image:
-        linear-gradient(rgba(124,106,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(124,106,255,0.03) 1px, transparent 1px);
-      background-size: 40px 40px;
-      pointer-events: none;
+        linear-gradient(rgba(124,106,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124,106,255,.03) 1px, transparent 1px);
+      background-size: 40px 40px; pointer-events: none;
     }
-
     .logo {
-      font-size: 13px;
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
-      color: var(--accent);
-      font-family: var(--mono);
-      margin-bottom: 2.5rem;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-size: 13px; letter-spacing: 0.25em; text-transform: uppercase;
+      color: var(--accent); font-family: var(--mono); margin-bottom: 2.5rem;
+      display: flex; align-items: center; gap: 8px;
     }
-
     .logo-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
+      width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
       animation: pulse 2s ease-in-out infinite;
     }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.8); }
-    }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
 
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 2.5rem 2rem;
-      width: 100%;
-      max-width: 360px;
-      text-align: center;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 2.5rem 2rem;
+      width: 100%; max-width: 380px; text-align: center;
     }
-
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 800;
-      margin-bottom: 0.4rem;
-      letter-spacing: -0.02em;
-    }
-
-    .subtitle {
-      font-size: 13px;
-      color: var(--muted);
-      font-family: var(--mono);
-      margin-bottom: 2rem;
-    }
-
-    /* PIN input row */
-    .pin-row {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      margin-bottom: 1.5rem;
-    }
-
-    .pin-digit {
-      width: 44px;
-      height: 56px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      font-family: var(--mono);
-      font-size: 1.5rem;
-      font-weight: 500;
-      color: var(--text);
-      text-align: center;
-      caret-color: var(--accent);
-      transition: border-color 0.15s, box-shadow 0.15s;
-      outline: none;
-      -webkit-appearance: none;
-    }
-
-    .pin-digit:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(124,106,255,0.15);
-    }
-
-    .pin-digit.filled {
-      border-color: var(--accent-dim);
-      color: var(--accent);
-    }
+    h1 { font-size: 1.5rem; font-weight: 800; margin-bottom: .4rem; letter-spacing: -.02em; }
+    .subtitle { font-size: 13px; color: var(--muted); font-family: var(--mono); margin-bottom: 2rem; }
 
     .error-msg {
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--error);
-      margin-bottom: 1.2rem;
-      padding: 8px 12px;
-      background: rgba(255,107,107,0.08);
-      border-radius: 8px;
-      border: 1px solid rgba(255,107,107,0.2);
+      font-family: var(--mono); font-size: 12px; color: var(--error);
+      margin-bottom: 1.2rem; padding: 8px 12px;
+      background: rgba(255,107,107,.08); border-radius: 8px;
+      border: 1px solid rgba(255,107,107,.2);
     }
+
+    /* ── PIN boxes ── */
+    .pin-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 1.5rem; }
+    .pin-digit {
+      width: 46px; height: 58px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; font-family: var(--mono); font-size: 1.6rem; font-weight: 500;
+      color: var(--text); text-align: center; outline: none;
+      transition: border-color .15s, box-shadow .15s; -webkit-appearance: none;
+    }
+    .pin-digit:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,106,255,.15); }
+    .pin-digit.filled { border-color: var(--accent-dim); color: var(--accent); }
+
+    /* ── Manual entry fallback (shown if JS fails) ── */
+    .manual-row { margin-top: .75rem; display: none; }
+    .manual-row input {
+      width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--mono);
+      font-size: 1.2rem; text-align: center; letter-spacing: .3em; outline: none;
+    }
+    .manual-row input:focus { border-color: var(--accent); }
 
     button[type="submit"] {
-      width: 100%;
-      padding: 14px;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      font-family: var(--sans);
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      letter-spacing: 0.01em;
-      transition: background 0.15s, transform 0.1s;
+      width: 100%; padding: 14px; background: var(--accent); color: #fff;
+      border: none; border-radius: 10px; font-family: var(--sans); font-size: 15px;
+      font-weight: 700; cursor: pointer; transition: background .15s, transform .1s;
     }
-
     button[type="submit"]:hover { background: #8f7fff; }
-    button[type="submit"]:active { transform: scale(0.98); }
+    button[type="submit"]:active { transform: scale(.98); }
+    button[type="submit"]:disabled { background: var(--accent-dim); cursor: not-allowed; }
 
-    .hint {
-      margin-top: 1.5rem;
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--muted);
-      line-height: 1.6;
-    }
+    .hint { margin-top: 1.5rem; font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.6; }
 
-    /* Hidden actual input that captures all 6 digits */
-    #pin-hidden {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-      width: 1px;
-      height: 1px;
+    /* show PIN display for dev — can remove in prod */
+    .dev-note {
+      margin-top: 1rem; font-family: var(--mono); font-size: 10px;
+      color: var(--muted); opacity: .5;
     }
   </style>
 </head>
 <body>
-  <div class="logo">
-    <span class="logo-dot"></span>
-    droply
-  </div>
+  <div class="logo"><span class="logo-dot"></span>droply</div>
 
   <div class="card">
     <h1>Enter PIN</h1>
-    <p class="subtitle">Get the PIN from the sender</p>
+    <p class="subtitle">Get the 6-digit PIN from the sender</p>
 
     {% if error %}
     <div class="error-msg">{{ error }}</div>
     {% endif %}
 
-    <form method="POST" id="pin-form">
-      <div class="pin-row" id="pin-display">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="0" autocomplete="off">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="1" autocomplete="off">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="2" autocomplete="off">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="3" autocomplete="off">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="4" autocomplete="off">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="5" autocomplete="off">
-      </div>
+    <form method="POST" action="/login" id="pin-form">
+      <!-- next_page tells server whether to redirect to /receive or / after login -->
+      <input type="hidden" name="next_page" value="{{ next_page }}">
+      <!-- Combined PIN value — filled by JS from the boxes below -->
       <input type="hidden" name="pin" id="pin-value">
+
+      <!-- 6 visual digit boxes -->
+      <div class="pin-row" id="pin-boxes">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               autocomplete="off" data-idx="0">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               autocomplete="off" data-idx="1">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               autocomplete="off" data-idx="2">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               autocomplete="off" data-idx="3">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               autocomplete="off" data-idx="4">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               autocomplete="off" data-idx="5">
+      </div>
+
+      <!-- Fallback: plain text box shown if JS fails -->
+      <div class="manual-row" id="manual-row">
+        <input type="text" id="manual-pin" maxlength="6" inputmode="numeric"
+               placeholder="······" autocomplete="off">
+      </div>
+
       <button type="submit" id="submit-btn">Connect →</button>
     </form>
 
-    <p class="hint">
-      Ask the sender for the 6-digit PIN.<br>
-      5 attempts allowed per minute.
-    </p>
+    <p class="hint">5 wrong attempts locks you out for 60 seconds.</p>
   </div>
 
   <script>
-    // Wire up the 6 individual digit boxes → hidden combined PIN field
-    const digits = document.querySelectorAll('.pin-digit');
+    const digits   = Array.from(document.querySelectorAll('.pin-digit'));
     const pinValue = document.getElementById('pin-value');
+    const form     = document.getElementById('pin-form');
+    const submitBtn = document.getElementById('submit-btn');
 
-    digits.forEach((d, i) => {
-      d.addEventListener('input', () => {
-        d.value = d.value.replace(/\D/g, '').slice(-1);
-        if (d.value) {
-          d.classList.add('filled');
-          if (i < 5) digits[i + 1].focus();
-        } else {
-          d.classList.remove('filled');
-        }
-        pinValue.value = Array.from(digits).map(x => x.value).join('');
-        // Auto-submit when all 6 filled
-        if (pinValue.value.length === 6) {
-          setTimeout(() => document.getElementById('pin-form').submit(), 120);
-        }
-      });
+    function syncPin() {
+      pinValue.value = digits.map(d => d.value).join('');
+    }
 
-      d.addEventListener('keydown', e => {
-        if (e.key === 'Backspace' && !d.value && i > 0) {
-          digits[i - 1].focus();
+    function tryAutoSubmit() {
+      syncPin();
+      if (pinValue.value.length === 6) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Connecting…';
+        // Small delay so the last digit visually fills before submit
+        setTimeout(() => form.submit(), 150);
+      }
+    }
+
+    digits.forEach((box, i) => {
+      box.addEventListener('keydown', e => {
+        // Backspace on empty → go back
+        if (e.key === 'Backspace' && !box.value && i > 0) {
+          e.preventDefault();
           digits[i - 1].value = '';
           digits[i - 1].classList.remove('filled');
+          digits[i - 1].focus();
+          syncPin();
+        }
+        // Left/right arrow navigation
+        if (e.key === 'ArrowLeft' && i > 0) digits[i - 1].focus();
+        if (e.key === 'ArrowRight' && i < 5) digits[i + 1].focus();
+      });
+
+      box.addEventListener('input', () => {
+        // Strip non-digits, keep only last char
+        box.value = box.value.replace(/\D/g, '').slice(-1);
+        if (box.value) {
+          box.classList.add('filled');
+          if (i < 5) digits[i + 1].focus();
+        } else {
+          box.classList.remove('filled');
+        }
+        tryAutoSubmit();
+      });
+
+      // Handle mobile autocomplete / autofill filling multiple digits at once
+      box.addEventListener('keyup', () => {
+        if (box.value.length > 1) {
+          const chars = box.value.replace(/\D/g, '').split('');
+          chars.forEach((ch, offset) => {
+            if (digits[i + offset]) {
+              digits[i + offset].value = ch;
+              digits[i + offset].classList.add('filled');
+            }
+          });
+          box.value = box.value[0];
+          tryAutoSubmit();
         }
       });
     });
 
-    // Paste support (paste the full PIN)
+    // Paste: works whether focused on a box or anywhere on the page
     document.addEventListener('paste', e => {
-      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
-      text.split('').forEach((ch, i) => {
-        if (digits[i]) { digits[i].value = ch; digits[i].classList.add('filled'); }
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData)
+                    .getData('text').replace(/\D/g, '').slice(0, 6);
+      digits.forEach((d, i) => {
+        d.value = text[i] || '';
+        d.classList.toggle('filled', !!text[i]);
       });
-      pinValue.value = text;
-      if (text.length === 6) setTimeout(() => document.getElementById('pin-form').submit(), 120);
+      tryAutoSubmit();
     });
 
+    // Validate pin value is set before manual submit (button click)
+    form.addEventListener('submit', e => {
+      syncPin();
+      if (pinValue.value.length !== 6) {
+        e.preventDefault();
+        // Highlight incomplete boxes
+        digits.forEach(d => {
+          if (!d.value) d.style.borderColor = 'var(--error)';
+        });
+        setTimeout(() => digits.forEach(d => d.style.borderColor = ''), 1000);
+      }
+    });
+
+    // Focus first box on load
     digits[0].focus();
   </script>
 </body>
