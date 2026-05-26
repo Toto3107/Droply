@@ -6,6 +6,18 @@
   <title>droply — sender</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
   <style>
+    /* ── WHAT CHANGED (Phase 2 index.html)
+       1. Receiver counter   — live "N receivers connected" badge in topbar via WS.
+          Turns green when ≥1 receiver is watching, stays grey when none.
+       2. WS sender socket  — connects to /ws/sender, receives receiver_count,
+          file_added, file_deleted events. Reconnects automatically.
+       3. WS status dot     — same visual as receive.html: live / reconnecting / poll.
+       4. Upload broadcast   — after upload, WS pushes file to receivers instantly.
+          (server side — no frontend change needed, just the visual confirmation.)
+       5. Receiver count card in stats grid.
+       6. /api/debug link   — shown in sidebar for quick diagnostics.
+       7. Minor: uptime auto-refreshes every 30s without flashing whole UI.
+    ── */
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
       --bg:#0a0a0f;--surface:#13131a;--surface2:#1a1a24;
@@ -35,13 +47,30 @@
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
     .topbar-right{display:flex;align-items:center;gap:10px;}
     .role-badge{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:99px;
-                background:rgba(124,106,255,.08);border:1px solid rgba(124,106,255,.25);
-                color:var(--accent);}
+                background:rgba(124,106,255,.08);border:1px solid rgba(124,106,255,.25);color:var(--accent);}
     .status-pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);
                  font-size:11px;color:var(--muted);padding:4px 10px;background:var(--surface);
                  border:1px solid var(--border);border-radius:99px;}
     .status-pill .dot{width:5px;height:5px;border-radius:50%;background:var(--success);
                       animation:pulse 2s ease-in-out infinite;}
+
+    /* CHANGE 1: receiver counter badge */
+    .recv-badge{display:flex;align-items:center;gap:5px;font-family:var(--mono);
+                font-size:11px;padding:4px 10px;border-radius:99px;
+                border:1px solid var(--border);transition:all .3s;}
+    .recv-badge.active{border-color:rgba(74,222,128,.4);background:rgba(74,222,128,.06);
+                       color:var(--success);}
+    .recv-badge.inactive{color:var(--muted);}
+    .recv-dot{width:5px;height:5px;border-radius:50%;transition:background .3s;}
+    .recv-badge.active   .recv-dot{background:var(--success);}
+    .recv-badge.inactive .recv-dot{background:var(--muted);}
+
+    /* CHANGE 3: WS status */
+    .ws-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:background .4s;}
+    .ws-live{background:var(--success);}
+    .ws-reconnecting{background:var(--warning);animation:pulse 1s ease-in-out infinite;}
+    .ws-poll{background:var(--muted);}
+
     .btn-ghost{font-family:var(--mono);font-size:11px;color:var(--muted);background:none;
                border:1px solid var(--border);padding:5px 12px;border-radius:8px;
                cursor:pointer;transition:color .15s;text-decoration:none;display:inline-block;}
@@ -61,14 +90,16 @@
             margin-top:8px;word-break:break-all;line-height:1.5;}
     .qr-url a{color:var(--accent);text-decoration:none;}
 
-    /* Stats */
+    /* Stats — CHANGE 5: 2x3 grid to fit receiver count */
     .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
     .stat-card{background:var(--surface);border:1px solid var(--border);
-               border-radius:10px;padding:10px 12px;}
-    .stat-val{font-size:1.2rem;font-weight:700;color:var(--accent);}
+               border-radius:10px;padding:10px 12px;transition:border-color .3s;}
+    .stat-card.highlight{border-color:rgba(74,222,128,.35);}
+    .stat-val{font-size:1.2rem;font-weight:700;color:var(--accent);transition:color .3s;}
+    .stat-val.green{color:var(--success);}
     .stat-lbl{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;}
 
-    /* Upload zone */
+    /* Upload */
     .upload-zone{border:1.5px dashed var(--border2);border-radius:12px;padding:1.25rem 1rem;
                  text-align:center;cursor:pointer;transition:border-color .15s,background .15s;
                  position:relative;}
@@ -85,8 +116,7 @@
     .path-input:focus{border-color:var(--accent);}
     .path-input::placeholder{color:var(--muted);}
     .path-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;
-              padding:7px 12px;font-family:var(--sans);font-size:12px;font-weight:700;
-              cursor:pointer;white-space:nowrap;}
+              padding:7px 12px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;}
     .path-btn:hover{background:#8f7fff;}
 
     /* Expiry */
@@ -98,7 +128,7 @@
     .expiry-row select:focus,.expiry-row input:focus{border-color:var(--accent);}
     .expiry-row select option{background:var(--surface);}
 
-    /* Progress */
+    /* Upload progress */
     .upload-progress{display:none;padding:12px;background:var(--surface);
                      border:1px solid var(--border);border-radius:10px;}
     .upload-progress.active{display:block;}
@@ -108,10 +138,14 @@
     .prog-fill{height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width .2s;}
     .prog-stats{font-family:var(--mono);font-size:10px;color:var(--muted);}
 
+    /* CHANGE 6: debug link */
+    .debug-link{font-family:var(--mono);font-size:10px;color:var(--muted);
+                text-decoration:none;padding:5px 8px;border-radius:6px;
+                border:1px solid var(--border);display:inline-block;margin-top:2px;}
+    .debug-link:hover{color:var(--text);}
+
     /* Main panel */
     .main{padding:1.5rem;overflow-y:auto;}
-
-    /* Tabs */
     .tabs{display:flex;gap:4px;margin-bottom:1.25rem;background:var(--surface);
           border:1px solid var(--border);border-radius:10px;padding:4px;}
     .tab{flex:1;font-family:var(--mono);font-size:11px;padding:7px 12px;border-radius:7px;
@@ -119,7 +153,6 @@
     .tab.active{background:var(--accent);color:#fff;}
     .tab-panel{display:none;}
     .tab-panel.active{display:block;}
-
     .main-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;}
     .main-hdr h2{font-size:1.1rem;font-weight:800;}
     .refresh-btn{font-family:var(--mono);font-size:11px;color:var(--muted);
@@ -131,8 +164,13 @@
     .file-list{display:flex;flex-direction:column;gap:8px;}
     .file-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;
                padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;
-               transition:border-color .15s;animation:slide-in .2s ease;}
-    @keyframes slide-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+               transition:border-color .2s,opacity .3s,transform .3s;}
+    @keyframes card-flash{
+      0%  {border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+      100%{border-color:var(--border);box-shadow:none;}
+    }
+    .file-card.ws-new{animation:card-flash .8s ease forwards;}
+    .file-card.removing{opacity:0;transform:translateX(24px);pointer-events:none;}
     .file-card:hover{border-color:var(--border2);}
     .file-icon{width:40px;height:40px;border-radius:8px;background:var(--surface2);
                border:1px solid var(--border);display:flex;align-items:center;
@@ -161,8 +199,7 @@
     /* Transfer log */
     .log-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;}
     .log-table th{text-align:left;padding:8px 12px;color:var(--muted);font-size:10px;
-                  letter-spacing:.08em;text-transform:uppercase;
-                  border-bottom:1px solid var(--border);}
+                  letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--border);}
     .log-table td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text);}
     .log-table tr:last-child td{border-bottom:none;}
     .log-table tr:hover td{background:var(--surface);}
@@ -179,8 +216,8 @@
     .toast{font-family:var(--mono);font-size:12px;padding:10px 16px;border-radius:10px;
            border:1px solid;backdrop-filter:blur(8px);animation:t-in .2s ease;max-width:280px;}
     @keyframes t-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
-    .toast-ok{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.25);color:var(--success);}
-    .toast-err{background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.25);color:var(--error);}
+    .toast-ok  {background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.25);color:var(--success);}
+    .toast-err {background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.25);color:var(--error);}
     .toast-info{background:rgba(124,106,255,.08);border-color:rgba(124,106,255,.25);color:var(--accent);}
 
     @media(max-width:700px){
@@ -197,6 +234,13 @@
     <div class="logo"><span class="logo-dot"></span>droply</div>
     <div class="topbar-right">
       <span class="role-badge">↑ sender</span>
+      <!-- CHANGE 1: live receiver counter -->
+      <span class="recv-badge inactive" id="recv-badge">
+        <span class="recv-dot"></span>
+        <span id="recv-count">0 receivers</span>
+      </span>
+      <!-- CHANGE 3: WS status -->
+      <span class="ws-dot ws-poll" id="ws-dot" title="WebSocket status"></span>
       <div class="status-pill"><span class="dot"></span><span id="server-ip">…</span></div>
       <a href="/receive" class="btn-ghost">receiver view</a>
       <a href="/logout" class="btn-ghost">disconnect</a>
@@ -217,28 +261,27 @@
       </div>
     </div>
 
+    <!-- CHANGE 5: 3rd stat card = receivers -->
     <div>
       <div class="sec-label">session</div>
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-val" id="stat-files">0</div><div class="stat-lbl">files</div></div>
-        <div class="stat-card"><div class="stat-val" id="stat-size">0B</div><div class="stat-lbl">total</div></div>
-        <div class="stat-card"><div class="stat-val" id="stat-dls">0</div><div class="stat-lbl">downloads</div></div>
+        <div class="stat-card"><div class="stat-val" id="stat-size">0B</div><div class="stat-lbl">total size</div></div>
+        <div class="stat-card" id="stat-recv-card"><div class="stat-val" id="stat-recv">0</div><div class="stat-lbl">receivers live</div></div>
         <div class="stat-card"><div class="stat-val" id="stat-up">—</div><div class="stat-lbl">uptime</div></div>
       </div>
     </div>
 
-    <!-- Upload -->
     <div>
       <div class="sec-label">upload file</div>
       <div class="upload-zone" id="drop-zone">
         <input type="file" id="file-input" multiple>
         <span class="upload-icon">⬆</span>
         <div class="upload-text">Drop files here</div>
-        <div class="upload-sub">or tap to browse</div>
+        <div class="upload-sub">or tap to browse · max 10 GB</div>
       </div>
     </div>
 
-    <!-- Share local path -->
     <div>
       <div class="sec-label">share local path</div>
       <div class="path-row">
@@ -246,11 +289,10 @@
         <button class="path-btn" onclick="sharePath()">Share</button>
       </div>
       <p style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px;line-height:1.5;">
-        Serves from disk — no copy made. Good for large files.
+        Serves from disk — no copy made.
       </p>
     </div>
 
-    <!-- Expiry -->
     <div>
       <div class="sec-label">file options</div>
       <div class="expiry-row">
@@ -267,11 +309,16 @@
       </div>
     </div>
 
-    <!-- Upload progress -->
     <div class="upload-progress" id="upload-progress">
       <div class="prog-name" id="prog-name">Uploading…</div>
       <div class="prog-bg"><div class="prog-fill" id="prog-fill"></div></div>
       <div class="prog-stats" id="prog-stats"></div>
+    </div>
+
+    <!-- CHANGE 6: diagnostics link -->
+    <div>
+      <div class="sec-label">diagnostics</div>
+      <a href="/api/debug" target="_blank" class="debug-link">🔍 /api/debug — network info</a>
     </div>
 
   </aside>
@@ -283,7 +330,6 @@
       <button class="tab" onclick="switchTab('transfers',this)">📋 Transfer log</button>
     </div>
 
-    <!-- Files tab -->
     <div class="tab-panel active" id="tab-files">
       <div class="main-hdr">
         <h2 id="files-heading">Files</h2>
@@ -294,7 +340,6 @@
       </div>
     </div>
 
-    <!-- Transfers tab -->
     <div class="tab-panel" id="tab-transfers">
       <div class="main-hdr">
         <h2>Transfer log</h2>
@@ -320,21 +365,21 @@ function fmtTime(iso){
   try{return new Date(iso+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch{return'';}
 }
 function fileIcon(n){
-  const e=n.split('.').pop().toLowerCase();
+  const e=(n||'').split('.').pop().toLowerCase();
   const m={pdf:'📄',mp4:'🎬',mkv:'🎬',mov:'🎬',avi:'🎬',mp3:'🎵',wav:'🎵',
-           jpg:'🖼',jpeg:'🖼',png:'🖼',gif:'🖼',webp:'🖼',zip:'📦',rar:'📦',
-           gz:'📦','7z':'📦',doc:'📝',docx:'📝',xls:'📊',xlsx:'📊',
-           py:'💻',js:'💻',txt:'📃',md:'📃'};
+           jpg:'🖼',jpeg:'🖼',png:'🖼',gif:'🖼',webp:'🖼',
+           zip:'📦',rar:'📦',gz:'📦','7z':'📦',
+           doc:'📝',docx:'📝',xls:'📊',xlsx:'📊',
+           py:'💻',js:'💻',ts:'💻',txt:'📃',md:'📃',csv:'📊'};
   return m[e]||'📁';
 }
 function toast(msg,type='info'){
   const el=document.createElement('div');
-  el.className=`toast toast-${type==='ok'?'ok':type==='err'?'err':'info'}`;
-  el.textContent=msg;
+  el.className=`toast toast-${type}`;el.textContent=msg;
   document.getElementById('toasts').appendChild(el);
   setTimeout(()=>el.remove(),3500);
 }
-async function copy(text){
+async function copyText(text){
   try{await navigator.clipboard.writeText(text);toast('Copied','ok');}
   catch{toast('Copy failed','err');}
 }
@@ -348,21 +393,91 @@ function switchTab(name,btn){
   if(name==='transfers') loadTransfers();
 }
 
+// ── File map (avoid full re-renders) ──────────────────────────────────────
+let fileMap = {};
+
+function fileCard(f){
+  const short = (f.sha256||'').slice(0,16)+'…';
+  const dlInfo = f.max_downloads>0 ? `${f.download_count}/${f.max_downloads} dl` : `${f.download_count} dl`;
+  const ext   = f.external ? `<span class="badge badge-ext">external</span>` : '';
+  return`
+  <div class="file-card" id="card-${f.id}">
+    <div class="file-icon">${fileIcon(f.name)}</div>
+    <div class="file-info">
+      <div class="file-name" title="${f.name}">${f.name}</div>
+      <div class="meta-row">
+        <span class="meta-item">${fmtBytes(f.size)}</span>
+        <span class="meta-item">${dlInfo}</span>
+        <span class="badge badge-ok">✓ verified</span>${ext}
+      </div>
+      <div class="file-hash" onclick="copyText('${f.sha256}')">SHA-256: ${short}</div>
+    </div>
+    <div class="file-actions">
+      <a href="/api/download/${f.id}" class="btn-dl" onclick="toast('Downloading…','info')">↓</a>
+      <button class="btn-del" onclick="deleteFile('${f.id}','${(f.name||'').replace(/'/g,"\\'")}')">×</button>
+    </div>
+  </div>`;
+}
+
+function renderAll(){
+  const files = Object.values(fileMap);
+  document.getElementById('stat-files').textContent = files.length;
+  document.getElementById('stat-size').textContent  = fmtBytes(files.reduce((s,f)=>s+f.size,0));
+  document.getElementById('files-heading').textContent =
+    files.length===1?'1 file shared':`${files.length} files shared`;
+  const c = document.getElementById('file-container');
+  if(!files.length){
+    c.innerHTML=`<div class="empty"><div class="empty-icon">📂</div>
+      <h3>No files — upload or share a path</h3></div>`;
+    return;
+  }
+  c.innerHTML=`<div class="file-list">${files.map(fileCard).join('')}</div>`;
+}
+
+function injectCard(f, flash=false){
+  fileMap[f.id] = f;
+  let list = document.querySelector('#tab-files .file-list');
+  if(!list){
+    document.getElementById('file-container').innerHTML='<div class="file-list"></div>';
+    list = document.querySelector('#tab-files .file-list');
+  }
+  const old = document.getElementById(`card-${f.id}`);
+  const div = document.createElement('div');
+  div.innerHTML = fileCard(f);
+  const card = div.firstElementChild;
+  if(flash) card.classList.add('ws-new');
+  if(old){ old.replaceWith(card); }
+  else { list.prepend(card); }
+  // update stat counts
+  const files = Object.values(fileMap);
+  document.getElementById('stat-files').textContent = files.length;
+  document.getElementById('stat-size').textContent  = fmtBytes(files.reduce((s,f)=>s+f.size,0));
+}
+
+function removeCard(file_id){
+  const card = document.getElementById(`card-${file_id}`);
+  if(card){
+    card.classList.add('removing');
+    setTimeout(()=>{ card.remove(); delete fileMap[file_id]; renderAll(); }, 320);
+  }
+}
+
 // ── Info / QR ──────────────────────────────────────────────────────────────
 async function loadInfo(){
   try{
-    const d=await(await fetch('/api/info')).json();
+    const d = await(await fetch('/api/info')).json();
     document.getElementById('server-ip').textContent=`${d.ip}:${d.port}`;
     document.getElementById('qr-url').innerHTML=
       `<a href="${d.receive_url}" target="_blank">${d.receive_url}</a>`;
     if(d.qr){
       const img=document.getElementById('qr-img');
-      img.src=d.qr;img.style.display='block';
+      img.src=d.qr; img.style.display='block';
       document.getElementById('qr-ph').style.display='none';
     }
   }catch(e){}
 }
 
+// CHANGE 7: uptime refreshes in place
 async function loadStatus(){
   try{
     const d=await(await fetch('/api/status')).json();
@@ -376,62 +491,21 @@ async function loadFiles(){
     const r=await fetch('/api/files');
     if(r.status===401){location.href='/login';return;}
     const d=await r.json();
-    const files=d.files||[];
-    document.getElementById('stat-files').textContent=files.length;
-    document.getElementById('stat-size').textContent=
-      fmtBytes(files.reduce((s,f)=>s+f.size,0));
-    document.getElementById('files-heading').textContent=
-      files.length===1?'1 file shared':`${files.length} files shared`;
-    renderFiles(files);
+    fileMap={};
+    (d.files||[]).forEach(f=>fileMap[f.id]=f);
+    renderAll();
   }catch(e){toast('Load failed','err');}
-}
-
-function renderFiles(files){
-  const c=document.getElementById('file-container');
-  if(!files.length){
-    c.innerHTML=`<div class="empty"><div class="empty-icon">📂</div>
-      <h3>No files yet — upload or share a path on the left</h3></div>`;
-    return;
-  }
-  c.innerHTML=`<div class="file-list">${files.map(fileCard).join('')}</div>`;
-}
-
-function fileCard(f){
-  const short=f.sha256.slice(0,16)+'…';
-  const dlInfo=f.max_downloads>0?`${f.download_count}/${f.max_downloads} dl`:`${f.download_count} dl`;
-  const ext=f.external?`<span class="badge badge-ext">external path</span>`:'';
-  return`
-  <div class="file-card" id="card-${f.id}">
-    <div class="file-icon">${fileIcon(f.name)}</div>
-    <div class="file-info">
-      <div class="file-name" title="${f.name}">${f.name}</div>
-      <div class="meta-row">
-        <span class="meta-item">${fmtBytes(f.size)}</span>
-        <span class="meta-item">${dlInfo}</span>
-        <span class="meta-item">${fmtTime(f.expires_at)||'no expiry'}</span>
-        <span class="badge badge-ok">✓ verified</span>${ext}
-      </div>
-      <div class="file-hash" onclick="copy('${f.sha256}')">SHA-256: ${short}</div>
-    </div>
-    <div class="file-actions">
-      <a href="/api/download/${f.id}" class="btn-dl" onclick="toast('Downloading…','info')">↓</a>
-      <button class="btn-del" onclick="deleteFile('${f.id}','${f.name.replace(/'/g,"\\'")}')">×</button>
-    </div>
-  </div>`;
 }
 
 async function deleteFile(id,name){
   if(!confirm(`Remove "${name}" from sharing?`))return;
   const r=await fetch(`/api/delete/${id}`,{method:'DELETE'});
-  if(r.ok){toast(`${name} removed`,'ok');loadFiles();}
+  if(r.ok){toast(`${name} removed`,'ok'); removeCard(id);}
   else toast('Delete failed','err');
 }
 
 // ── Upload ─────────────────────────────────────────────────────────────────
-async function uploadFiles(list){
-  for(const f of list) await uploadOne(f);
-  loadFiles();
-}
+async function uploadFiles(list){ for(const f of list) await uploadOne(f); }
 
 function uploadOne(file){
   return new Promise(resolve=>{
@@ -443,7 +517,7 @@ function uploadOne(file){
     const fill=document.getElementById('prog-fill');
     const stats=document.getElementById('prog-stats');
     document.getElementById('prog-name').textContent=file.name;
-    prog.classList.add('active');fill.style.width='0%';
+    prog.classList.add('active'); fill.style.width='0%';
     const xhr=new XMLHttpRequest();
     const t0=Date.now();
     xhr.upload.addEventListener('progress',e=>{
@@ -457,7 +531,9 @@ function uploadOne(file){
       prog.classList.remove('active');
       if(xhr.status===201||xhr.status===200){
         const d=JSON.parse(xhr.responseText);
-        toast(d.dedup?`${file.name} already shared (dedup)`:`${file.name} shared`,'ok');
+        toast(d.dedup?`${file.name} already shared`:`${file.name} shared`,'ok');
+        // WS broadcast handles the card injection; fallback: loadFiles
+        setTimeout(loadFiles, 400);
       }else{
         try{toast(JSON.parse(xhr.responseText).error||'Upload failed','err');}
         catch{toast('Upload failed','err');}
@@ -465,7 +541,7 @@ function uploadOne(file){
       resolve();
     });
     xhr.addEventListener('error',()=>{prog.classList.remove('active');toast('Upload error','err');resolve();});
-    xhr.open('POST','/api/upload');xhr.send(fd);
+    xhr.open('POST','/api/upload'); xhr.send(fd);
   });
 }
 
@@ -473,32 +549,27 @@ function uploadOne(file){
 async function sharePath(){
   const p=document.getElementById('path-input').value.trim();
   if(!p){toast('Enter a file path','err');return;}
-  const ttl=document.getElementById('ttl-select').value;
-  const max=document.getElementById('max-dl').value||'0';
   try{
     const r=await fetch('/api/share-path',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({path:p,ttl_hours:parseInt(ttl),max_downloads:parseInt(max)})
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:p,
+        ttl_hours:parseInt(document.getElementById('ttl-select').value),
+        max_downloads:parseInt(document.getElementById('max-dl').value||'0')})
     });
     const d=await r.json();
     if(r.ok||r.status===200){
-      toast(d.dedup?`${d.name} already shared`:`${d.name} shared from disk`,'ok');
+      toast(d.dedup?`${d.name} already shared`:`${d.name} shared`,'ok');
       document.getElementById('path-input').value='';
-      loadFiles();
-    }else{
-      toast(d.error||'Share failed','err');
-    }
+      setTimeout(loadFiles,400);
+    }else{ toast(d.error||'Share failed','err'); }
   }catch(e){toast('Request failed','err');}
 }
 
 // ── Transfer log ───────────────────────────────────────────────────────────
 async function loadTransfers(){
   try{
-    const r=await fetch('/api/transfers');
-    const d=await r.json();
+    const d=await(await fetch('/api/transfers')).json();
     const logs=d.transfers||[];
-    document.getElementById('stat-dls').textContent=logs.length;
     const c=document.getElementById('transfers-container');
     if(!logs.length){
       c.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><h3>No downloads yet</h3></div>`;
@@ -507,14 +578,14 @@ async function loadTransfers(){
     const rows=[...logs].reverse().map(t=>`
       <tr>
         <td>${fmtTime(t.ts)||t.ts.slice(11,16)}</td>
-        <td>${t.file_name}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.file_name}</td>
         <td>${fmtBytes(t.size)}</td>
         <td>${t.remote_addr}</td>
       </tr>`).join('');
     c.innerHTML=`<table class="log-table">
       <thead><tr><th>Time</th><th>File</th><th>Size</th><th>From</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
-  }catch(e){toast('Log load failed','err');}
+  }catch(e){toast('Log failed','err');}
 }
 
 // ── Drag & drop ────────────────────────────────────────────────────────────
@@ -523,19 +594,89 @@ const fi=document.getElementById('file-input');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');
-  if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files);});
+  if(e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);});
 fi.addEventListener('change',()=>{if(fi.files.length){uploadFiles(fi.files);fi.value='';}});
-
-// ── Path input: Enter key ──────────────────────────────────────────────────
 document.getElementById('path-input').addEventListener('keydown',e=>{
-  if(e.key==='Enter')sharePath();
+  if(e.key==='Enter') sharePath();
 });
 
-// ── Auto refresh ───────────────────────────────────────────────────────────
-setInterval(loadFiles,10000);
-setInterval(loadStatus,30000);
+// ── CHANGE 2: WebSocket sender connection ──────────────────────────────────
+let ws=null, wsRetryDelay=1000, wsRetryTimer=null, pollTimer=null;
 
-loadInfo();loadFiles();loadStatus();
+function setRecvCount(n){
+  const badge = document.getElementById('recv-badge');
+  const label = document.getElementById('recv-count');
+  const stat  = document.getElementById('stat-recv');
+  const card  = document.getElementById('stat-recv-card');
+  label.textContent = n===1?'1 receiver':`${n} receivers`;
+  stat.textContent  = n;
+  badge.className   = `recv-badge ${n>0?'active':'inactive'}`;
+  stat.className    = `stat-val${n>0?' green':''}`;
+  card.className    = `stat-card${n>0?' highlight':''}`;
+}
+
+function setWsStatus(state){
+  document.getElementById('ws-dot').className=`ws-dot ws-${state}`;
+}
+
+function startPolling(){
+  if(pollTimer)return;
+  pollTimer=setInterval(loadFiles,12000);
+  setWsStatus('poll');
+}
+function stopPolling(){
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+}
+
+function connectWS(){
+  if(ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))return;
+  const proto=location.protocol==='https:'?'wss':'ws';
+  try{ ws=new WebSocket(`${proto}://${location.host}/ws/sender`); }
+  catch(e){ startPolling(); return; }
+
+  setWsStatus('reconnecting');
+
+  ws.onopen=()=>{
+    wsRetryDelay=1000;
+    setWsStatus('live');
+    stopPolling();
+    if(wsRetryTimer){clearTimeout(wsRetryTimer);wsRetryTimer=null;}
+  };
+
+  ws.onmessage=e=>{
+    let msg; try{msg=JSON.parse(e.data);}catch{return;}
+
+    if(msg.event==='receiver_count'){
+      setRecvCount(msg.count);
+    }
+    if(msg.event==='file_added'){
+      fetch('/api/files').then(r=>r.json()).then(d=>{
+        const f=(d.files||[]).find(f=>f.id===msg.file_id);
+        if(f) injectCard(f, false);
+      }).catch(()=>{});
+    }
+    if(msg.event==='file_deleted'){
+      removeCard(msg.file_id);
+    }
+  };
+
+  ws.onerror=()=>{};
+  ws.onclose=()=>{
+    setWsStatus('reconnecting');
+    startPolling();
+    wsRetryTimer=setTimeout(()=>{
+      wsRetryDelay=Math.min(wsRetryDelay*2,30000);
+      connectWS();
+    }, wsRetryDelay);
+  };
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+loadInfo();
+loadFiles();
+loadStatus();
+connectWS();
+setInterval(loadStatus,30000);
 </script>
 </body>
 </html>

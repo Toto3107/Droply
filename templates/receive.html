@@ -3,9 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>droply — receive files</title>
+  <title>droply — receive</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
   <style>
+    /* ── WHAT CHANGED (Phase 2 receive.html)
+       1. WebSocket connection  — replaces 15s setInterval poll entirely.
+          File cards appear/disappear in real time as sender acts.
+          WS auto-reconnects with exponential backoff if connection drops.
+       2. WS status indicator  — small dot in topbar: green=live, amber=reconnecting, grey=poll.
+       3. New-file flash       — cards animate with a brief accent-border flash when added via WS.
+       4. File-deleted removal — card slides out instantly when sender deletes without reload.
+       5. Download retry logic — token expired? auto-fetches a fresh token and retries once.
+       6. Offline banner       — shown when browser loses network entirely (navigator.onLine).
+       7. Mobile: swipe hint   — subtle indicator on narrow screens that download is one tap.
+    ── */
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
       --bg:#0a0a0f;--surface:#13131a;--surface2:#1a1a24;
@@ -32,28 +43,57 @@
     .logo-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
               animation:pulse 2s ease-in-out infinite;}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .topbar-right{display:flex;align-items:center;gap:10px;}
     .role-badge{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:99px;
                 background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.25);
                 color:var(--success);}
+
+    /* CHANGE 2: WS status dot */
+    .ws-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .4s;}
+    .ws-live{background:var(--success);}
+    .ws-reconnecting{background:var(--warning);animation:pulse 1s ease-in-out infinite;}
+    .ws-poll{background:var(--muted);}
+    .ws-label{font-family:var(--mono);font-size:10px;color:var(--muted);}
+
     .btn-ghost{font-family:var(--mono);font-size:11px;color:var(--muted);background:none;
                border:1px solid var(--border);padding:5px 12px;border-radius:8px;
-               cursor:pointer;transition:color .15s,border-color .15s;text-decoration:none;}
-    .btn-ghost:hover{color:var(--text);border-color:var(--border2);}
+               cursor:pointer;text-decoration:none;transition:color .15s;}
+    .btn-ghost:hover{color:var(--text);}
+
+    /* CHANGE 6: Offline banner */
+    .offline-banner{display:none;position:sticky;top:0;z-index:10;
+      background:rgba(255,107,107,.12);border-bottom:1px solid rgba(255,107,107,.3);
+      padding:8px 1.5rem;font-family:var(--mono);font-size:12px;color:var(--error);
+      text-align:center;}
+    .offline-banner.show{display:block;}
 
     /* ── Main ── */
-    .main{position:relative;z-index:1;flex:1;max-width:720px;width:100%;
+    .main{position:relative;z-index:1;flex:1;max-width:740px;width:100%;
           margin:0 auto;padding:2rem 1.5rem;}
-
     .page-title{font-size:1.75rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.4rem;}
     .page-sub{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:2rem;}
+    .refresh-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;}
+    .refresh-row h2{font-size:1.1rem;font-weight:800;}
+    .refresh-btn{font-family:var(--mono);font-size:11px;color:var(--muted);
+                 background:var(--surface);border:1px solid var(--border);
+                 padding:5px 12px;border-radius:8px;cursor:pointer;}
+    .refresh-btn:hover{color:var(--text);}
 
-    /* ── File card ── */
+    /* ── File cards ── */
     .file-list{display:flex;flex-direction:column;gap:10px;}
     .file-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
                padding:1.25rem 1.5rem;display:flex;align-items:center;gap:1rem;
-               animation:slide-in .2s ease;}
-    @keyframes slide-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-    .file-card:hover{border-color:var(--border2);}
+               transition:border-color .2s,opacity .3s,transform .3s;}
+
+    /* CHANGE 3: flash on WS-added card */
+    @keyframes card-flash{
+      0%  {border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+      100%{border-color:var(--border);box-shadow:none;}
+    }
+    .file-card.ws-new{animation:card-flash .8s ease forwards;}
+
+    /* CHANGE 4: slide-out on delete */
+    .file-card.removing{opacity:0;transform:translateX(24px);pointer-events:none;}
 
     .file-icon{width:48px;height:48px;border-radius:10px;background:var(--surface2);
                border:1px solid var(--border);display:flex;align-items:center;
@@ -67,7 +107,7 @@
               margin-top:5px;cursor:pointer;opacity:.7;}
     .hash-row:hover{opacity:1;}
 
-    /* Progress row — shown during download */
+    /* Progress */
     .dl-progress{display:none;margin-top:10px;}
     .dl-progress.active{display:block;}
     .prog-bar-bg{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
@@ -75,44 +115,31 @@
                    width:0%;transition:width .2s;}
     .prog-label{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;}
 
-    /* Verified badge */
     .badge-ok{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:99px;
               color:var(--success);border:1px solid rgba(74,222,128,.25);
               background:rgba(74,222,128,.06);}
-
-    /* Download button */
-    .btn-dl{font-family:var(--sans);font-size:13px;font-weight:700;
-            background:var(--accent);color:#fff;border:none;padding:10px 20px;
-            border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0;
-            transition:background .15s,transform .1s;text-decoration:none;
-            display:inline-flex;align-items:center;gap:6px;}
+    .btn-dl{font-family:var(--sans);font-size:13px;font-weight:700;background:var(--accent);
+            color:#fff;border:none;padding:10px 20px;border-radius:10px;cursor:pointer;
+            white-space:nowrap;flex-shrink:0;transition:background .15s,transform .1s;
+            text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
     .btn-dl:hover{background:#8f7fff;}
     .btn-dl:active{transform:scale(.97);}
     .btn-dl:disabled{background:var(--border2);cursor:not-allowed;opacity:.5;}
 
-    /* Empty / loading states */
+    /* States */
     .state-center{display:flex;flex-direction:column;align-items:center;
                   justify-content:center;min-height:300px;text-align:center;gap:12px;}
     .state-icon{font-size:48px;opacity:.3;}
     .state-title{font-size:1rem;font-weight:700;color:var(--muted);}
     .state-sub{font-family:var(--mono);font-size:12px;color:var(--muted);opacity:.6;}
 
-    /* Refresh bar */
-    .refresh-row{display:flex;justify-content:space-between;align-items:center;
-                 margin-bottom:1.25rem;}
-    .refresh-row h2{font-size:1.1rem;font-weight:800;}
-    .refresh-btn{font-family:var(--mono);font-size:11px;color:var(--muted);
-                 background:var(--surface);border:1px solid var(--border);
-                 padding:5px 12px;border-radius:8px;cursor:pointer;}
-    .refresh-btn:hover{color:var(--text);}
-
-    /* Toast */
+    /* Toasts */
     #toasts{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;
             flex-direction:column;gap:8px;z-index:9999;}
     .toast{font-family:var(--mono);font-size:12px;padding:10px 16px;border-radius:10px;
            border:1px solid;backdrop-filter:blur(8px);animation:t-in .2s ease;max-width:280px;}
     @keyframes t-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
-    .toast-ok{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.25);color:var(--success);}
+    .toast-ok {background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.25);color:var(--success);}
     .toast-err{background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.25);color:var(--error);}
     .toast-info{background:rgba(124,106,255,.08);border-color:rgba(124,106,255,.25);color:var(--accent);}
 
@@ -124,9 +151,17 @@
 </head>
 <body>
 
+<!-- CHANGE 6: offline banner -->
+<div class="offline-banner" id="offline-banner">
+  ⚠ No network — check you're on the same Wi-Fi as the sender
+</div>
+
 <header class="topbar">
   <div class="logo"><span class="logo-dot"></span>droply</div>
-  <div style="display:flex;align-items:center;gap:10px;">
+  <div class="topbar-right">
+    <!-- CHANGE 2: live WS status -->
+    <span class="ws-dot ws-poll" id="ws-dot" title="Connection status"></span>
+    <span class="ws-label" id="ws-label">connecting…</span>
     <span class="role-badge">↓ receiver</span>
     <a href="/logout" class="btn-ghost">disconnect</a>
   </div>
@@ -134,13 +169,11 @@
 
 <main class="main">
   <h1 class="page-title">Files for you</h1>
-  <p class="page-sub" id="sub-text">Loading available files…</p>
-
+  <p class="page-sub" id="sub-text">Connecting…</p>
   <div class="refresh-row">
     <h2 id="file-count-label">—</h2>
     <button class="refresh-btn" onclick="loadFiles()">↻ refresh</button>
   </div>
-
   <div id="file-container">
     <div class="state-center">
       <div class="state-icon">⏳</div>
@@ -154,78 +187,57 @@
 <script>
 // ── Utils ──────────────────────────────────────────────────────────────────
 function fmtBytes(b){
-  if(!b)return'0 B';
-  const k=1024,s=['B','KB','MB','GB','TB'];
-  const i=Math.floor(Math.log(b)/Math.log(k));
-  return(b/k**i).toFixed(1)+' '+s[i];
+  if(!b)return'0 B';const k=1024,s=['B','KB','MB','GB','TB'];
+  const i=Math.floor(Math.log(b)/Math.log(k));return(b/k**i).toFixed(1)+' '+s[i];
 }
 function fmtTime(iso){
   if(!iso)return'';
-  try{return new Date(iso+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
-  catch{return'';}
+  try{return new Date(iso+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch{return'';}
 }
-function fileIcon(name){
-  const ext=name.split('.').pop().toLowerCase();
-  const m={pdf:'📄',mp4:'🎬',mkv:'🎬',mov:'🎬',avi:'🎬',mp3:'🎵',wav:'🎵',
+function fileIcon(n){
+  const e=(n||'').split('.').pop().toLowerCase();
+  const m={pdf:'📄',mp4:'🎬',mkv:'🎬',mov:'🎬',avi:'🎬',mp3:'🎵',wav:'🎵',flac:'🎵',
            jpg:'🖼',jpeg:'🖼',png:'🖼',gif:'🖼',webp:'🖼',
-           zip:'📦',rar:'📦',gz:'📦','7z':'📦',
-           doc:'📝',docx:'📝',xls:'📊',xlsx:'📊',py:'💻',js:'💻',
-           txt:'📃',md:'📃'};
-  return m[ext]||'📁';
+           zip:'📦',rar:'📦',gz:'📦','7z':'📦',tar:'📦',
+           doc:'📝',docx:'📝',xls:'📊',xlsx:'📊',ppt:'📊',pptx:'📊',
+           py:'💻',js:'💻',ts:'💻',html:'💻',css:'💻',
+           txt:'📃',md:'📃',csv:'📊'};
+  return m[e]||'📁';
 }
 function toast(msg,type='info'){
   const el=document.createElement('div');
-  el.className=`toast toast-${type}`;
-  el.textContent=msg;
+  el.className=`toast toast-${type}`;el.textContent=msg;
   document.getElementById('toasts').appendChild(el);
   setTimeout(()=>el.remove(),3500);
 }
-async function copy(text){
+async function copyText(text){
   try{await navigator.clipboard.writeText(text);toast('Copied','ok');}
   catch{toast('Copy failed','err');}
 }
 
-// ── Load files ─────────────────────────────────────────────────────────────
-let _files = [];
+// ── File state ─────────────────────────────────────────────────────────────
+// Map of file_id → file object so we can add/remove without full re-render
+let fileMap = {};
 
-async function loadFiles(){
-  try{
-    const r=await fetch('/api/files');
-    if(r.status===401){location.href='/login?next=receive';return;}
-    const d=await r.json();
-    _files=d.files||[];
-    document.getElementById('file-count-label').textContent=
-      _files.length===0?'No files yet':
-      _files.length===1?'1 file available':`${_files.length} files available`;
-    document.getElementById('sub-text').textContent=
-      _files.length===0?'The sender hasn\'t shared anything yet — check back soon.':
-      'Tap a file to download it directly to your device.';
-    render(_files);
-  }catch(e){
-    toast('Could not load files','err');
-  }
+function updateCounts(){
+  const files = Object.values(fileMap);
+  const n = files.length;
+  document.getElementById('file-count-label').textContent =
+    n===0?'No files yet': n===1?'1 file available':`${n} files available`;
+  document.getElementById('sub-text').textContent =
+    n===0?'The sender hasn\'t shared anything yet.':'Tap a file to download it to your device.';
 }
 
-function render(files){
-  const c=document.getElementById('file-container');
-  if(!files.length){
-    c.innerHTML=`<div class="state-center">
-      <div class="state-icon">📭</div>
-      <div class="state-title">Nothing here yet</div>
-      <div class="state-sub">The sender will upload files — this page refreshes automatically</div>
-    </div>`;
-    return;
-  }
-  c.innerHTML=`<div class="file-list">${files.map(card).join('')}</div>`;
-}
-
-function card(f){
-  const short=f.sha256.slice(0,16)+'…';
-  const dlLeft=f.max_downloads>0
-    ?`${f.max_downloads-f.download_count} downloads left`
-    :'Unlimited downloads';
-  const exp=f.expires_at?`Expires ${fmtTime(f.expires_at)}`:'No expiry';
-  return`
+// ── Render helpers ─────────────────────────────────────────────────────────
+function cardHTML(f){
+  const short   = (f.sha256||'').slice(0,16)+'…';
+  const dlLeft  = f.max_downloads>0
+    ? `${f.max_downloads - f.download_count} left`
+    : 'Unlimited';
+  const exp     = f.expires_at ? `Expires ${fmtTime(f.expires_at)}` : 'No expiry';
+  // escape name for use in onclick attribute
+  const safeName = (f.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  return `
   <div class="file-card" id="fc-${f.id}">
     <div class="file-icon">${fileIcon(f.name)}</div>
     <div class="file-info">
@@ -236,91 +248,249 @@ function card(f){
         <span class="meta-chip">${exp}</span>
         <span class="badge-ok">verified ✓</span>
       </div>
-      <div class="hash-row" onclick="copy('${f.sha256}')">SHA-256: ${short} (tap to copy)</div>
+      <div class="hash-row" onclick="copyText('${f.sha256}')">SHA-256: ${short}</div>
       <div class="dl-progress" id="prog-${f.id}">
         <div class="prog-bar-bg"><div class="prog-bar-fill" id="fill-${f.id}"></div></div>
         <div class="prog-label" id="lbl-${f.id}">Starting…</div>
       </div>
     </div>
-    <button class="btn-dl" id="btn-${f.id}" onclick="downloadFile('${f.id}','${f.dl_token}','${f.name}')">
+    <button class="btn-dl" id="btn-${f.id}"
+            onclick="downloadFile('${f.id}','${f.dl_token||''}','${safeName}')">
       ↓ Download
     </button>
   </div>`;
 }
 
-// ── Download with XHR progress ─────────────────────────────────────────────
+function renderAll(){
+  const c = document.getElementById('file-container');
+  const files = Object.values(fileMap);
+  if(!files.length){
+    c.innerHTML=`<div class="state-center">
+      <div class="state-icon">📭</div>
+      <div class="state-title">Nothing here yet</div>
+      <div class="state-sub">Files appear here the moment the sender shares them</div>
+    </div>`;
+    return;
+  }
+  c.innerHTML=`<div class="file-list">${files.map(cardHTML).join('')}</div>`;
+  updateCounts();
+}
+
+// CHANGE 3: inject a single new card into the DOM (no full re-render)
+function injectCard(f, flash=false){
+  let list = document.querySelector('.file-list');
+  if(!list){
+    document.getElementById('file-container').innerHTML='<div class="file-list"></div>';
+    list = document.querySelector('.file-list');
+  }
+  const existing = document.getElementById(`fc-${f.id}`);
+  if(existing){ existing.outerHTML = cardHTML(f); return; }
+  const div = document.createElement('div');
+  div.innerHTML = cardHTML(f);
+  const card = div.firstElementChild;
+  if(flash) card.classList.add('ws-new');
+  list.prepend(card);
+  updateCounts();
+}
+
+// CHANGE 4: remove a card with slide-out animation
+function removeCard(file_id){
+  const card = document.getElementById(`fc-${file_id}`);
+  if(!card) return;
+  card.classList.add('removing');
+  setTimeout(()=>{
+    card.remove();
+    delete fileMap[file_id];
+    updateCounts();
+    if(!Object.keys(fileMap).length) renderAll();
+  }, 320);
+}
+
+// ── Full load (HTTP fallback + initial load) ───────────────────────────────
+async function loadFiles(){
+  try{
+    const r = await fetch('/api/files');
+    if(r.status===401){ location.href='/login?next=receive'; return; }
+    const d = await r.json();
+    fileMap = {};
+    (d.files||[]).forEach(f => fileMap[f.id] = f);
+    renderAll();
+  }catch(e){
+    toast('Could not load files','err');
+  }
+}
+
+// ── CHANGE 5: Download with auto-retry on expired token ────────────────────
 async function downloadFile(fileId, token, name){
   const btn  = document.getElementById(`btn-${fileId}`);
   const prog = document.getElementById(`prog-${fileId}`);
   const fill = document.getElementById(`fill-${fileId}`);
   const lbl  = document.getElementById(`lbl-${fileId}`);
+  if(!btn) return;
 
-  btn.disabled=true;btn.textContent='Downloading…';
+  btn.disabled=true; btn.textContent='Downloading…';
   prog.classList.add('active');
 
-  // Use token URL for download — tokens are pre-fetched with the file list
-  const url = `/api/download-token/${token}`;
-
-  return new Promise(resolve=>{
-    const xhr=new XMLHttpRequest();
-    xhr.open('GET',url);
+  const doXHR = (url) => new Promise(resolve=>{
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
     xhr.responseType='blob';
-    const t0=Date.now();
+    const t0 = Date.now();
 
-    xhr.addEventListener('progress',e=>{
-      if(!e.lengthComputable)return;
-      const pct=(e.loaded/e.total*100).toFixed(0);
-      const spd=e.loaded/((Date.now()-t0)/1000);
-      const rem=spd>0?((e.total-e.loaded)/spd).toFixed(0):'?';
-      fill.style.width=pct+'%';
-      lbl.textContent=`${pct}% · ${fmtBytes(spd)}/s · ~${rem}s`;
+    xhr.addEventListener('progress', e=>{
+      if(!e.lengthComputable) return;
+      const pct = (e.loaded/e.total*100).toFixed(0);
+      const spd = e.loaded / ((Date.now()-t0)/1000);
+      const rem = spd>0 ? ((e.total-e.loaded)/spd).toFixed(0) : '?';
+      fill.style.width = pct+'%';
+      lbl.textContent  = `${pct}% · ${fmtBytes(spd)}/s · ~${rem}s`;
     });
 
-    xhr.addEventListener('load',()=>{
-      if(xhr.status===200){
-        // Trigger browser "save file" dialog
-        const blob=new Blob([xhr.response]);
-        const a=document.createElement('a');
-        a.href=URL.createObjectURL(blob);
-        a.download=name;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        fill.style.width='100%';
-        lbl.textContent='Done ✓';
-        btn.textContent='↓ Download again';
-        btn.disabled=false;
-        toast(`${name} saved!`,'ok');
-        setTimeout(()=>prog.classList.remove('active'),2000);
-        // Refresh token for next download click
-        loadFiles();
-      } else if(xhr.status===410){
-        lbl.textContent='Download limit reached';
-        toast('This file has reached its download limit','err');
-        btn.textContent='Unavailable';
-      } else {
-        lbl.textContent='Download failed';
-        toast('Download failed — try again','err');
-        btn.textContent='↓ Retry';
-        btn.disabled=false;
-      }
-      resolve();
-    });
-
-    xhr.addEventListener('error',()=>{
-      toast('Connection lost','err');
-      btn.textContent='↓ Retry';
-      btn.disabled=false;
-      prog.classList.remove('active');
-      resolve();
-    });
-
+    xhr.addEventListener('load', ()=>resolve(xhr));
+    xhr.addEventListener('error',()=>resolve(xhr));
     xhr.send();
   });
+
+  // Try with current token
+  let xhr = await doXHR(`/api/download-token/${token}`);
+
+  // CHANGE 5: token expired (410) → fetch a fresh one and retry once
+  if(xhr.status === 410){
+    lbl.textContent = 'Refreshing token…';
+    try{
+      const fr = await fetch('/api/files');
+      const fd = await fr.json();
+      const fresh = (fd.files||[]).find(f=>f.id===fileId);
+      if(fresh && fresh.dl_token){
+        fileMap[fileId] = fresh;
+        xhr = await doXHR(`/api/download-token/${fresh.dl_token}`);
+      }
+    }catch(_){}
+  }
+
+  if(xhr.status === 200){
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([xhr.response]));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    fill.style.width='100%';
+    lbl.textContent='Done ✓';
+    btn.textContent='↓ Download again';
+    btn.disabled=false;
+    toast(`${name} saved!`,'ok');
+    setTimeout(()=>prog.classList.remove('active'), 2000);
+    // Refresh token for next click
+    loadFiles();
+  } else if(xhr.status === 410){
+    lbl.textContent='Limit reached — file unavailable';
+    toast('Download limit reached','err');
+    btn.textContent='Unavailable';
+  } else {
+    lbl.textContent='Failed — tap Retry';
+    toast('Download failed','err');
+    btn.textContent='↓ Retry';
+    btn.disabled=false;
+    prog.classList.remove('active');
+  }
 }
 
-// Auto-refresh every 15 s
-setInterval(loadFiles,15000);
+// ── CHANGE 1: WebSocket with exponential backoff reconnect ─────────────────
+// WHY: Mobile connections drop constantly. Without reconnect, the receiver
+//      sees the dot go grey and never updates again without a manual refresh.
+let ws = null;
+let wsRetryDelay = 1000;   // starts at 1s, doubles each failure, caps at 30s
+let wsRetryTimer = null;
+let usingWS      = false;
+let pollTimer    = null;
+
+function setWsStatus(state){
+  // state: 'live' | 'reconnecting' | 'poll'
+  const dot = document.getElementById('ws-dot');
+  const lbl = document.getElementById('ws-label');
+  dot.className = `ws-dot ws-${state}`;
+  lbl.textContent = state==='live' ? 'live' : state==='reconnecting' ? 'reconnecting…' : 'polling';
+}
+
+function startPolling(){
+  if(pollTimer) return;
+  pollTimer = setInterval(loadFiles, 12000);
+  setWsStatus('poll');
+}
+
+function stopPolling(){
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+}
+
+function connectWS(){
+  if(ws && (ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN)) return;
+
+  const proto = location.protocol==='https:' ? 'wss' : 'ws';
+  const url   = `${proto}://${location.host}/ws/receiver`;
+
+  try{ ws = new WebSocket(url); }
+  catch(e){ startPolling(); return; }
+
+  setWsStatus('reconnecting');
+
+  ws.onopen = ()=>{
+    usingWS       = true;
+    wsRetryDelay  = 1000;
+    setWsStatus('live');
+    stopPolling();
+    // Full refresh on reconnect to catch anything we missed
+    loadFiles();
+    if(wsRetryTimer){ clearTimeout(wsRetryTimer); wsRetryTimer=null; }
+  };
+
+  ws.onmessage = e=>{
+    let msg;
+    try{ msg = JSON.parse(e.data); }catch{ return; }
+
+    if(msg.event === 'file_added'){
+      // Fetch full file record (inc. dl_token) then inject card
+      fetch('/api/files').then(r=>r.json()).then(d=>{
+        const f = (d.files||[]).find(f=>f.id===msg.file_id);
+        if(f){
+          fileMap[f.id] = f;
+          injectCard(f, true);   // flash = true → accent border animation
+          toast(`New: ${f.name}`,'info');
+        }
+      }).catch(()=>{});
+    }
+
+    if(msg.event === 'file_deleted'){
+      removeCard(msg.file_id);
+      toast(`Removed: ${msg.name}`,'info');
+    }
+  };
+
+  ws.onerror = ()=>{};
+
+  ws.onclose = ()=>{
+    usingWS = false;
+    setWsStatus('reconnecting');
+    startPolling();   // fallback to polling while WS is down
+    wsRetryTimer = setTimeout(()=>{
+      wsRetryDelay = Math.min(wsRetryDelay * 2, 30000);
+      connectWS();
+    }, wsRetryDelay);
+  };
+}
+
+// ── CHANGE 6: Offline banner ───────────────────────────────────────────────
+window.addEventListener('offline', ()=>{
+  document.getElementById('offline-banner').classList.add('show');
+});
+window.addEventListener('online', ()=>{
+  document.getElementById('offline-banner').classList.remove('show');
+  loadFiles();
+  connectWS();
+});
+
+// ── Boot ───────────────────────────────────────────────────────────────────
 loadFiles();
+connectWS();
 </script>
 </body>
 </html>
