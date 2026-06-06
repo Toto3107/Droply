@@ -1,5 +1,5 @@
 # ── droply .gitignore ─────────────────────────────────────────────────────────
-
+new.py
 # Security — NEVER commit these
 cert.pem
 key.pem

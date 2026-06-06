@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>droply relay — receive</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0a0a0f;--surface:#13131a;--surface2:#1a1a24;
+      --border:#1e1e2e;--border2:#2a2a3e;
+      --accent:#7c6aff;--text:#e8e6f0;--muted:#6b6880;
+      --success:#4ade80;--error:#ff6b6b;--warn:#fbbf24;
+      --mono:ui-monospace,monospace;--sans:system-ui,sans-serif;
+    }
+    body{font-family:var(--sans);background:var(--bg);color:var(--text);
+         min-height:100vh;display:flex;flex-direction:column;align-items:center;
+         padding:2rem 1rem;}
+    body::before{content:'';position:fixed;inset:0;
+      background-image:linear-gradient(rgba(124,106,255,.025) 1px,transparent 1px),
+                       linear-gradient(90deg,rgba(124,106,255,.025) 1px,transparent 1px);
+      background-size:40px 40px;pointer-events:none;}
+    .shell{position:relative;z-index:1;width:100%;max-width:560px;}
+
+    .logo{font-family:var(--mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;
+          color:var(--accent);display:flex;align-items:center;gap:8px;margin-bottom:2rem;}
+    .logo-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
+              animation:pulse 2s ease-in-out infinite;}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .tag{font-size:10px;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);
+         color:var(--success);padding:2px 8px;border-radius:99px;margin-left:4px;}
+
+    .card{background:var(--surface);border:1px solid var(--border);
+          border-radius:16px;padding:1.5rem;margin-bottom:12px;}
+    .card-title{font-size:14px;font-weight:600;margin-bottom:12px;}
+
+    .step{display:none;} .step.active{display:block;}
+
+    /* PIN entry boxes */
+    .pin-row{display:flex;gap:8px;justify-content:center;margin-bottom:1.25rem;}
+    .pin-digit{width:46px;height:58px;background:var(--surface2);border:1px solid var(--border);
+               border-radius:10px;font-family:var(--mono);font-size:1.6rem;font-weight:500;
+               color:var(--text);text-align:center;outline:none;
+               transition:border-color .15s,box-shadow .15s;-webkit-appearance:none;}
+    .pin-digit:focus{border-color:var(--success);box-shadow:0 0 0 3px rgba(74,222,128,.12);}
+    .pin-digit.filled{border-color:rgba(74,222,128,.5);color:var(--success);}
+
+    .session-input{width:100%;padding:10px 12px;background:var(--surface2);
+                   border:1px solid var(--border);border-radius:10px;color:var(--text);
+                   font-family:var(--mono);font-size:12px;outline:none;margin-bottom:12px;}
+    .session-input:focus{border-color:var(--accent);}
+    .session-input::placeholder{color:var(--muted);}
+
+    .error-msg{font-family:var(--mono);font-size:12px;color:var(--error);
+               padding:8px 12px;background:rgba(255,107,107,.08);border-radius:8px;
+               border:1px solid rgba(255,107,107,.2);margin-bottom:12px;}
+
+    /* File cards */
+    .file-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;
+               padding:1rem 1.25rem;display:flex;align-items:center;gap:12px;
+               margin-bottom:8px;transition:border-color .2s;}
+    .file-card:hover{border-color:var(--border2);}
+    @keyframes card-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .file-card.new{animation:card-in .3s ease;}
+    .file-icon{font-size:22px;flex-shrink:0;}
+    .file-info{flex:1;min-width:0;}
+    .file-name{font-size:14px;font-weight:600;white-space:nowrap;
+               overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;}
+    .file-meta{font-family:var(--mono);font-size:11px;color:var(--muted);}
+    .hash-row{font-family:var(--mono);font-size:10px;color:rgba(124,106,255,.7);
+              margin-top:3px;cursor:pointer;}
+    .hash-row:hover{color:var(--accent);}
+    .prog-wrap{margin-top:6px;display:none;}
+    .prog-wrap.active{display:block;}
+    .prog-bg{height:3px;background:var(--border2);border-radius:2px;overflow:hidden;}
+    .prog-fill{height:100%;background:var(--success);border-radius:2px;transition:width .2s;}
+    .prog-lbl{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px;}
+
+    /* Badges */
+    .badge{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid;}
+    .b-ok{color:var(--success);border-color:rgba(74,222,128,.3);background:rgba(74,222,128,.06);}
+    .b-pending{color:var(--warn);border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.06);}
+    .b-err{color:var(--error);border-color:rgba(255,107,107,.3);background:rgba(255,107,107,.06);}
+
+    /* WS status */
+    .ws-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0;}
+    .ws-live{background:var(--success);} 
+    .ws-rec{background:var(--warn);animation:pulse 1s ease-in-out infinite;}
+    .ws-off{background:var(--muted);}
+    .status-row{display:flex;align-items:center;gap:6px;font-family:var(--mono);
+                font-size:11px;color:var(--muted);}
+
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;
+         border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;
+         border:none;transition:all .15s;}
+    .btn-primary{background:var(--success);color:#0a0a0f;}
+    .btn-primary:hover{background:#5fe88c;}
+    .btn-dl{background:var(--accent);color:#fff;padding:8px 14px;font-size:12px;
+            flex-shrink:0;}
+    .btn-dl:hover{background:#8f7fff;}
+    .btn-dl:disabled{opacity:.4;cursor:not-allowed;}
+    .btn:disabled{opacity:.4;cursor:not-allowed;}
+
+    /* Empty / states */
+    .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+           min-height:180px;text-align:center;gap:10px;}
+    .empty-icon{font-size:40px;opacity:.3;}
+    .empty-title{font-size:14px;font-weight:600;color:var(--muted);}
+    .empty-sub{font-family:var(--mono);font-size:11px;color:var(--muted);opacity:.6;}
+
+    /* Info row */
+    .info-row{display:flex;justify-content:space-between;padding:7px 0;
+              border-bottom:1px solid var(--border);}
+    .info-row:last-child{border-bottom:none;}
+    .info-key{font-size:12px;color:var(--muted);}
+    .info-val{font-family:var(--mono);font-size:12px;color:var(--text);}
+
+    /* Toasts */
+    #toasts{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;
+            flex-direction:column;gap:8px;z-index:9999;}
+    .toast{font-family:var(--mono);font-size:12px;padding:10px 14px;border-radius:10px;
+           border:1px solid;animation:t-in .2s ease;max-width:260px;}
+    @keyframes t-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+    .t-ok{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.3);color:var(--success);}
+    .t-err{background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3);color:var(--error);}
+    .t-info{background:rgba(124,106,255,.08);border-color:rgba(124,106,255,.3);color:var(--accent);}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="logo">
+    <span class="logo-dot"></span>droply
+    <span class="tag">↓ receive</span>
+  </div>
+
+  <!-- Step 1: enter session + PIN -->
+  <div class="step active" id="step-join">
+    <div class="card">
+      <div class="card-title">Enter session details</div>
+      <div id="join-error" style="display:none" class="error-msg"></div>
+      <label style="font-family:var(--mono);font-size:11px;color:var(--muted);
+                    display:block;margin-bottom:6px;">Session ID from sender</label>
+      <input class="session-input" id="session-input"
+             placeholder="e.g. aBcDeFgHiJkLmNoP" autocomplete="off" spellcheck="false">
+      <label style="font-family:var(--mono);font-size:11px;color:var(--muted);
+                    display:block;margin-bottom:8px;">6-digit PIN from sender</label>
+      <div class="pin-row" id="pin-boxes">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" data-idx="0" autocomplete="off">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" data-idx="1" autocomplete="off">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" data-idx="2" autocomplete="off">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" data-idx="3" autocomplete="off">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" data-idx="4" autocomplete="off">
+        <input class="pin-digit" maxlength="1" inputmode="numeric" data-idx="5" autocomplete="off">
+      </div>
+      <button class="btn btn-primary" id="btn-join" onclick="joinSession()" style="width:100%">
+        Connect →
+      </button>
+      <p style="font-family:var(--mono);font-size:11px;color:var(--muted);
+                margin-top:10px;text-align:center;line-height:1.6;">
+        Get the session ID and PIN from the sender.<br>
+        Files are end-to-end encrypted — the relay never sees your content.
+      </p>
+    </div>
+  </div>
+
+  <!-- Step 2: file list -->
+  <div class="step" id="step-files">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="card-title" style="margin:0">📥 Files available</div>
+        <div class="status-row">
+          <span class="ws-dot ws-off" id="ws-dot"></span>
+          <span id="ws-label">connecting…</span>
+        </div>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Session</span>
+        <span class="info-val" id="disp-session" style="font-size:10px;"></span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Expires</span>
+        <span class="info-val" id="disp-expires"></span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Encryption</span>
+        <span class="info-val">AES-256-GCM · verified</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="card-title" style="margin:0" id="file-heading">Files</div>
+        <button class="btn" style="padding:5px 10px;font-size:11px;
+                background:var(--surface2);border:1px solid var(--border);color:var(--muted);"
+                onclick="refreshFiles()">↻</button>
+      </div>
+      <div id="file-container">
+        <div class="empty">
+          <div class="empty-icon">⏳</div>
+          <div class="empty-title">Waiting for files…</div>
+          <div class="empty-sub">This updates live when sender shares</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="relay_client.js"></script>
+<script>
+const RELAY_URL = window.RELAY_URL || "";
+const relay = new DroplyRelay(RELAY_URL);
+
+let SESSION_ID = null;
+let CURRENT_PIN = null;
+let fileMap = {};
+let wsHandle = null;
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function fmt(b){ return DroplyRelay.formatBytes(b); }
+function toast(msg,type='info'){
+  const el=document.createElement('div');
+  el.className=`toast t-${type}`;el.textContent=msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(),3500);
+}
+function fileIcon(n){
+  const e=(n||'').split('.').pop().toLowerCase();
+  const m={pdf:'📄',mp4:'🎬',mp3:'🎵',jpg:'🖼',png:'🖼',zip:'📦',doc:'📝',txt:'📃',csv:'📊'};
+  return m[e]||'📁';
+}
+function setWsStatus(s){
+  const dot=document.getElementById('ws-dot');
+  const lbl=document.getElementById('ws-label');
+  dot.className=`ws-dot ${s==='live'?'ws-live':s==='reconnecting'?'ws-rec':'ws-off'}`;
+  lbl.textContent=s==='live'?'live':s==='reconnecting'?'reconnecting…':'offline';
+}
+
+// ── PIN boxes ─────────────────────────────────────────────────────────────────
+const digits=Array.from(document.querySelectorAll('.pin-digit'));
+let pinValue='';
+
+function syncPin(){
+  pinValue=digits.map(d=>d.value).join('');
+}
+function tryAutoJoin(){
+  syncPin();
+  if(pinValue.length===6 && document.getElementById('session-input').value.trim()){
+    joinSession();
+  }
+}
+
+digits.forEach((box,i)=>{
+  box.addEventListener('keydown',e=>{
+    if(e.key==='Backspace'&&!box.value&&i>0){
+      e.preventDefault();digits[i-1].value='';digits[i-1].classList.remove('filled');
+      digits[i-1].focus();syncPin();
+    }
+    if(e.key==='ArrowLeft'&&i>0) digits[i-1].focus();
+    if(e.key==='ArrowRight'&&i<5) digits[i+1].focus();
+  });
+  box.addEventListener('input',()=>{
+    box.value=box.value.replace(/\D/g,'').slice(-1);
+    box.classList.toggle('filled',!!box.value);
+    if(box.value&&i<5) digits[i+1].focus();
+    tryAutoJoin();
+  });
+});
+
+document.addEventListener('paste',e=>{
+  const text=(e.clipboardData||window.clipboardData).getData('text').replace(/\D/g,'').slice(0,6);
+  digits.forEach((d,i)=>{d.value=text[i]||'';d.classList.toggle('filled',!!text[i]);});
+  tryAutoJoin();
+});
+
+// Pre-fill session ID from URL param ?s=...
+const urlParams=new URLSearchParams(location.search);
+if(urlParams.has('s')){
+  document.getElementById('session-input').value=urlParams.get('s');
+  setTimeout(()=>digits[0].focus(),100);
+}
+
+// ── Join session ──────────────────────────────────────────────────────────────
+async function joinSession(){
+  syncPin();
+  const sid=document.getElementById('session-input').value.trim();
+  const errEl=document.getElementById('join-error');
+  const btn=document.getElementById('btn-join');
+
+  if(!sid){ errEl.textContent='Enter the session ID from the sender.';errEl.style.display='block';return; }
+  if(pinValue.length!==6){ errEl.textContent='Enter all 6 PIN digits.';errEl.style.display='block';return; }
+
+  btn.disabled=true;btn.textContent='Connecting…';
+  errEl.style.display='none';
+
+  try{
+    const data=await relay.joinSession(sid,pinValue);
+    SESSION_ID=sid;
+    CURRENT_PIN=pinValue;
+
+    document.getElementById('disp-session').textContent=sid.slice(0,8)+'…';
+    document.getElementById('disp-expires').textContent=
+      new Date(data.expires_at+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+
+    document.getElementById('step-join').classList.remove('active');
+    document.getElementById('step-files').classList.add('active');
+
+    fileMap={};
+    renderFiles(data.files||[]);
+    connectWS();
+    toast('Connected','ok');
+  }catch(e){
+    errEl.textContent=e.message.includes('Wrong PIN')?'Wrong PIN — check with sender.':
+                      e.message.includes('not found')?'Session not found or expired.':
+                      `Error: ${e.message}`;
+    errEl.style.display='block';
+    btn.disabled=false;btn.textContent='Connect →';
+  }
+}
+
+// ── File rendering ────────────────────────────────────────────────────────────
+async function refreshFiles(){
+  if(!SESSION_ID||!CURRENT_PIN) return;
+  try{
+    const data=await relay.listFiles(SESSION_ID,CURRENT_PIN);
+    (data.files||[]).forEach(f=>{ fileMap[f.id]=f; });
+    renderFiles(Object.values(fileMap));
+  }catch(e){ toast('Refresh failed','err'); }
+}
+
+function renderFiles(files){
+  const c=document.getElementById('file-container');
+  const h=document.getElementById('file-heading');
+  const complete=files.filter(f=>f.complete);
+  h.textContent=complete.length===0?'Waiting for files':
+    complete.length===1?'1 file available':`${complete.length} files available`;
+  if(!files.length){
+    c.innerHTML=`<div class="empty">
+      <div class="empty-icon">📭</div>
+      <div class="empty-title">No files yet</div>
+      <div class="empty-sub">Files appear here the moment sender uploads</div>
+    </div>`;
+    return;
+  }
+  c.innerHTML=files.map(fileCard).join('');
+}
+
+function fileCard(f){
+  const short=(f.sha256||'').slice(0,16)+'…';
+  const incomplete=!f.complete;
+  return `
+  <div class="file-card${incomplete?' ':''}">
+    <div class="file-icon">${fileIcon(f.name)}</div>
+    <div class="file-info">
+      <div class="file-name" title="${f.name}">${f.name}</div>
+      <div class="file-meta">${fmt(f.size)} · ${f.chunks_total} chunks</div>
+      <div class="hash-row" onclick="copyText('${f.sha256}')">SHA-256: ${short}</div>
+      <div class="prog-wrap" id="dlprog-${f.id}">
+        <div class="prog-bg"><div class="prog-fill" id="dlfill-${f.id}"></div></div>
+        <div class="prog-lbl" id="dllbl-${f.id}">Starting…</div>
+      </div>
+    </div>
+    ${incomplete
+      ? `<span class="badge b-pending">uploading…</span>`
+      : `<button class="btn btn-dl" id="dlbtn-${f.id}"
+             onclick="downloadFile('${f.id}','${f.name.replace(/'/g,"\\'")}',${f.chunks_total},'${f.sha256}')">
+           ↓ Download
+         </button>`
+    }
+  </div>`;
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+async function downloadFile(fileId,name,totalChunks,sha256){
+  const btn=document.getElementById(`dlbtn-${fileId}`);
+  const prog=document.getElementById(`dlprog-${fileId}`);
+  const fill=document.getElementById(`dlfill-${fileId}`);
+  const lbl=document.getElementById(`dllbl-${fileId}`);
+  if(!btn||!prog) return;
+
+  btn.disabled=true; btn.textContent='Decrypting…';
+  prog.classList.add('active');
+
+  try{
+    const result=await relay.downloadFile(
+      SESSION_ID,fileId,name,CURRENT_PIN,totalChunks,sha256,
+      (p)=>{
+        fill.style.width=p.percent+'%';
+        lbl.textContent=`${p.percent}% · ${DroplyRelay.formatSpeed(p.speed)}`;
+      }
+    );
+
+    fill.style.width='100%';
+    lbl.textContent=result.verified?'Done · integrity verified ✓':'Done (integrity check failed ⚠)';
+    btn.textContent='↓ Again';
+    btn.disabled=false;
+
+    if(result.verified){
+      toast(`${name} saved · verified ✓`,'ok');
+    } else {
+      toast(`${name} saved but integrity check FAILED`,'err');
+    }
+
+    // Refresh tokens for next click
+    setTimeout(refreshFiles,500);
+
+  }catch(e){
+    lbl.textContent='Failed';
+    btn.textContent='↓ Retry';
+    btn.disabled=false;
+    toast(`Download failed: ${e.message}`,'err');
+  }
+}
+
+async function copyText(t){
+  await navigator.clipboard.writeText(t).catch(()=>{});
+  toast('Copied','ok');
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS(){
+  if(wsHandle) wsHandle.close();
+  wsHandle=relay.connectWS(
+    SESSION_ID, CURRENT_PIN,
+    (event)=>{
+      if(event.event==='file_complete'){
+        toast(`New file: ${event.name}`,'info');
+        refreshFiles();
+      }
+      if(event.event==='chunk_received'){
+        // Update progress indicator on pending file card if visible
+        const card=document.querySelector(`[data-fid="${event.file_id}"]`);
+        if(card){
+          const pct=Math.round((event.chunk/event.total)*100);
+          const fill=card.querySelector('.prog-fill');
+          if(fill) fill.style.width=pct+'%';
+        }
+      }
+      if(event.event==='session_ended'){
+        toast('Session ended by sender','err');
+        setTimeout(()=>location.reload(),2000);
+      }
+    },
+    (status)=>setWsStatus(status==='connected'?'live':status)
+  );
+}
+</script>
+</body>
+</html>

@@ -124,9 +124,17 @@ def _run_tray():
     try:
         import pystray
         from PIL import Image, ImageDraw
-    except ImportError:
-        # No tray — just keep the server thread alive
-        print("\ndroply running. Press Ctrl-C to quit.\n")
+        # Force a backend check now so we catch ValueError (headless/no GTK)
+        # before we try to build the icon and crash silently later.
+        _ = pystray.Icon   # triggers backend resolution
+    except (ImportError, ValueError, Exception):
+        # No tray (headless server, no GTK, CI environment) —
+        # just keep the server thread alive and print status to console.
+        print("\ndroply running (no tray — console mode).")
+        print(f"  Sender  : {SENDER_URL}")
+        print(f"  Receiver: {RECEIVER_URL}")
+        print(f"  PIN     : {_srv.CURRENT_PIN}")
+        print("\nPress Ctrl-C to quit.\n")
         try:
             while True:
                 time.sleep(1)
@@ -202,7 +210,7 @@ def _run_tray():
     icon = pystray.Icon(
         name="droply",
         icon=_make_icon_image(64),
-        title=f"droply  —  PIN: {_srv.CURRENT_PIN}",
+        title=f"droply  -  PIN: {_srv.CURRENT_PIN}",
         menu=_build_menu(),
     )
 

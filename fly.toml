@@ -1,0 +1,38 @@
+# fly.toml — droply relay on Fly.io (free tier)
+#
+# Deploy:
+#   fly launch --name droply-relay    (first time)
+#   fly secrets set RELAY_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+#   fly secrets set REDIS_URL=redis://...   (get from Upstash — free tier)
+#   fly deploy                             (subsequent deploys)
+#
+# Free tier: 3 shared-cpu-1x 256MB VMs — more than enough for this
+
+app = "droply-relay"
+primary_region = "sin"   # Singapore — change to closest region: lhr, iad, fra, nrt
+
+[build]
+  # Uses Dockerfile if present, else nixpacks auto-detect (Python)
+
+[env]
+  PORT            = "8080"
+  SESSION_TTL_SEC = "7200"
+  CHUNK_SIZE_BYTES = "2097152"
+  MAX_FILE_SIZE   = "5368709120"
+
+[http_service]
+  internal_port    = 8080
+  force_https      = true
+  auto_stop_machines  = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 200
+    soft_limit = 150
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

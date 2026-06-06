@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>droply relay — send</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0a0a0f;--surface:#13131a;--surface2:#1a1a24;
+      --border:#1e1e2e;--border2:#2a2a3e;
+      --accent:#7c6aff;--text:#e8e6f0;--muted:#6b6880;
+      --success:#4ade80;--error:#ff6b6b;--warn:#fbbf24;
+      --mono:ui-monospace,monospace;--sans:system-ui,sans-serif;
+    }
+    body{font-family:var(--sans);background:var(--bg);color:var(--text);
+         min-height:100vh;display:flex;flex-direction:column;align-items:center;
+         justify-content:flex-start;padding:2rem 1rem;}
+    body::before{content:'';position:fixed;inset:0;
+      background-image:linear-gradient(rgba(124,106,255,.025) 1px,transparent 1px),
+                       linear-gradient(90deg,rgba(124,106,255,.025) 1px,transparent 1px);
+      background-size:40px 40px;pointer-events:none;}
+    .shell{position:relative;z-index:1;width:100%;max-width:560px;}
+
+    /* Logo */
+    .logo{font-family:var(--mono);font-size:12px;letter-spacing:.2em;
+          text-transform:uppercase;color:var(--accent);display:flex;
+          align-items:center;gap:8px;margin-bottom:2rem;}
+    .logo-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
+              animation:pulse 2s ease-in-out infinite;}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .tag{font-size:10px;background:rgba(124,106,255,.12);border:1px solid rgba(124,106,255,.25);
+         color:var(--accent);padding:2px 8px;border-radius:99px;margin-left:4px;}
+
+    /* Card */
+    .card{background:var(--surface);border:1px solid var(--border);
+          border-radius:16px;padding:1.5rem;margin-bottom:12px;}
+    .card-title{font-size:14px;font-weight:600;margin-bottom:12px;
+                display:flex;align-items:center;gap:8px;}
+
+    /* Steps */
+    .step{display:none;}
+    .step.active{display:block;}
+
+    /* PIN display */
+    .pin-display{display:flex;gap:6px;justify-content:center;margin:12px 0;}
+    .pin-char{width:44px;height:56px;background:var(--surface2);border:1px solid var(--border2);
+              border-radius:10px;font-family:var(--mono);font-size:1.6rem;font-weight:600;
+              color:var(--accent);display:flex;align-items:center;justify-content:center;}
+    .pin-label{font-family:var(--mono);font-size:11px;color:var(--muted);
+               text-align:center;margin-top:6px;}
+
+    /* Session info */
+    .info-row{display:flex;justify-content:space-between;align-items:center;
+              padding:8px 0;border-bottom:1px solid var(--border);}
+    .info-row:last-child{border-bottom:none;}
+    .info-key{font-size:12px;color:var(--muted);}
+    .info-val{font-family:var(--mono);font-size:12px;color:var(--text);}
+
+    /* Drop zone */
+    .drop-zone{border:1.5px dashed var(--border2);border-radius:12px;padding:2rem 1rem;
+               text-align:center;cursor:pointer;transition:all .15s;position:relative;}
+    .drop-zone:hover,.drop-zone.over{border-color:var(--accent);background:rgba(124,106,255,.06);}
+    .drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+    .drop-icon{font-size:32px;margin-bottom:8px;}
+    .drop-text{font-size:14px;font-weight:600;margin-bottom:4px;}
+    .drop-sub{font-size:12px;color:var(--muted);}
+
+    /* File list */
+    .file-entry{display:flex;align-items:center;gap:10px;padding:10px 0;
+                border-bottom:1px solid var(--border);}
+    .file-entry:last-child{border-bottom:none;}
+    .file-icon{font-size:20px;flex-shrink:0;}
+    .file-info{flex:1;min-width:0;}
+    .file-name{font-size:13px;font-weight:600;white-space:nowrap;
+               overflow:hidden;text-overflow:ellipsis;}
+    .file-meta{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;}
+    .prog-wrap{margin-top:6px;}
+    .prog-bg{height:3px;background:var(--border2);border-radius:2px;overflow:hidden;}
+    .prog-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .2s;}
+    .prog-label{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px;}
+
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;
+         border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;
+         border:none;transition:all .15s;}
+    .btn-primary{background:var(--accent);color:#fff;}
+    .btn-primary:hover{background:#8f7fff;}
+    .btn-outline{background:none;border:1px solid var(--border2);color:var(--muted);}
+    .btn-outline:hover{color:var(--text);border-color:var(--border);}
+    .btn:disabled{opacity:.4;cursor:not-allowed;}
+    .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+
+    /* Status badges */
+    .badge{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid;}
+    .b-ok{color:var(--success);border-color:rgba(74,222,128,.3);background:rgba(74,222,128,.06);}
+    .b-up{color:var(--warn);border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.06);}
+    .b-err{color:var(--error);border-color:rgba(255,107,107,.3);background:rgba(255,107,107,.06);}
+
+    /* QR placeholder */
+    .qr-wrap{text-align:center;margin:12px 0;}
+    .qr-wrap img{width:140px;height:140px;border-radius:8px;background:white;padding:4px;}
+    .qr-url{font-family:var(--mono);font-size:10px;color:var(--muted);
+            margin-top:6px;word-break:break-all;}
+
+    /* Toasts */
+    #toasts{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;
+            flex-direction:column;gap:8px;z-index:9999;}
+    .toast{font-family:var(--mono);font-size:12px;padding:10px 14px;border-radius:10px;
+           border:1px solid;animation:t-in .2s ease;max-width:260px;}
+    @keyframes t-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+    .t-ok{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.3);color:var(--success);}
+    .t-err{background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3);color:var(--error);}
+    .t-info{background:rgba(124,106,255,.08);border-color:rgba(124,106,255,.3);color:var(--accent);}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="logo">
+    <span class="logo-dot"></span>droply
+    <span class="tag">relay</span>
+  </div>
+
+  <!-- Step 1: create session -->
+  <div class="step active" id="step-create">
+    <div class="card">
+      <div class="card-title">📡 Start a relay session</div>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:16px;">
+        Send large files to anyone, anywhere — no same Wi-Fi needed.
+        Files are end-to-end encrypted. The relay never sees your content.
+      </p>
+      <button class="btn btn-primary" id="btn-create" onclick="createSession()">
+        Create session →
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 2: session ready, upload files -->
+  <div class="step" id="step-session">
+    <div class="card">
+      <div class="card-title">🔑 Share this with your receiver</div>
+      <div class="pin-display" id="pin-display"></div>
+      <p class="pin-label">6-digit PIN — share this with your receiver</p>
+      <div class="qr-wrap" id="qr-wrap"></div>
+      <div style="margin-top:12px;">
+        <div class="info-row">
+          <span class="info-key">Receiver link</span>
+          <span class="info-val" id="recv-url" style="font-size:11px;"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Expires</span>
+          <span class="info-val" id="expires-at"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Encryption</span>
+          <span class="info-val">AES-256-GCM end-to-end</span>
+        </div>
+      </div>
+      <button class="btn btn-outline" style="margin-top:10px;width:100%;"
+              onclick="copyReceiverLink()">📋 Copy receiver link</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📤 Upload files</div>
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" multiple>
+        <div class="drop-icon">⬆</div>
+        <div class="drop-text">Drop files here</div>
+        <div class="drop-sub">or tap to browse · any device · any network</div>
+      </div>
+      <div id="file-list" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-outline" onclick="endSession()">End session</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="relay_client.js"></script>
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const RELAY_URL = window.RELAY_URL || "";   // set by server or same-origin
+const relay = new DroplyRelay(RELAY_URL);
+
+let SESSION_ID = null;
+let MGMT_TOKEN = null;
+let CURRENT_PIN = null;
+let RECV_URL = null;
+
+// ── Utils ────────────────────────────────────────────────────────────────────
+function fmt(b){ return DroplyRelay.formatBytes(b); }
+function toast(msg,type='info'){
+  const el=document.createElement('div');
+  el.className=`toast t-${type}`;el.textContent=msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(),3500);
+}
+function fileIcon(n){
+  const e=(n||'').split('.').pop().toLowerCase();
+  const m={pdf:'📄',mp4:'🎬',mp3:'🎵',jpg:'🖼',png:'🖼',zip:'📦',doc:'📝',txt:'📃'};
+  return m[e]||'📁';
+}
+function makeQR(url){
+  const src=`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
+  return `<img src="${src}" alt="QR code for ${url}">`;
+}
+
+// ── Create session ────────────────────────────────────────────────────────────
+async function createSession(){
+  const btn = document.getElementById('btn-create');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  try {
+    const { sessionId, pin, mgmtToken, expiresAt } = await relay.createSession();
+    SESSION_ID  = sessionId;
+    MGMT_TOKEN  = mgmtToken;
+    CURRENT_PIN = pin;
+    RECV_URL    = `${location.origin}/relay-receive.html?s=${sessionId}`;
+
+    // Show PIN boxes
+    document.getElementById('pin-display').innerHTML =
+      pin.split('').map(c=>`<div class="pin-char">${c}</div>`).join('');
+
+    // QR
+    document.getElementById('qr-wrap').innerHTML =
+      makeQR(RECV_URL) + `<p class="qr-url">${RECV_URL}</p>`;
+
+    document.getElementById('recv-url').textContent = RECV_URL;
+    document.getElementById('expires-at').textContent =
+      new Date(expiresAt+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+
+    document.getElementById('step-create').classList.remove('active');
+    document.getElementById('step-session').classList.add('active');
+    toast('Session created — share the PIN!','ok');
+  } catch(e) {
+    toast(`Failed: ${e.message}`,'err');
+    btn.disabled = false;
+    btn.textContent = 'Create session →';
+  }
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+async function uploadFiles(files){
+  for(const file of files){
+    const entryId = `f-${Date.now()}`;
+    const list = document.getElementById('file-list');
+    list.innerHTML += `
+      <div class="file-entry" id="${entryId}">
+        <div class="file-icon">${fileIcon(file.name)}</div>
+        <div class="file-info">
+          <div class="file-name">${file.name}</div>
+          <div class="file-meta">${fmt(file.size)}</div>
+          <div class="prog-wrap">
+            <div class="prog-bg"><div class="prog-fill" id="fill-${entryId}" style="width:0%"></div></div>
+            <div class="prog-label" id="lbl-${entryId}">Encrypting…</div>
+          </div>
+        </div>
+        <span class="badge b-up" id="badge-${entryId}">uploading</span>
+      </div>`;
+    try {
+      const result = await relay.uploadFile(
+        file, SESSION_ID, MGMT_TOKEN, CURRENT_PIN,
+        (p) => {
+          document.getElementById(`fill-${entryId}`).style.width = p.percent+'%';
+          document.getElementById(`lbl-${entryId}`).textContent =
+            `${p.percent}% · ${DroplyRelay.formatSpeed(p.speed)}${p.eta?` · ~${p.eta}s`:''}`;
+        }
+      );
+      document.getElementById(`badge-${entryId}`).className = 'badge b-ok';
+      document.getElementById(`badge-${entryId}`).textContent = 'shared ✓';
+      document.getElementById(`lbl-${entryId}`).textContent = `Done · SHA-256: ${result.sha256.slice(0,12)}…`;
+      toast(`${file.name} shared`,'ok');
+    } catch(e) {
+      document.getElementById(`badge-${entryId}`).className = 'badge b-err';
+      document.getElementById(`badge-${entryId}`).textContent = 'failed';
+      toast(`Upload failed: ${e.message}`,'err');
+    }
+  }
+}
+
+// ── End session ───────────────────────────────────────────────────────────────
+async function endSession(){
+  if(!confirm('End this session? All shared files will be deleted.')) return;
+  try {
+    await relay.deleteSession(SESSION_ID, MGMT_TOKEN);
+    toast('Session ended','ok');
+    setTimeout(()=>location.reload(), 1000);
+  } catch(e) { toast(`Error: ${e.message}`,'err'); }
+}
+
+function copyReceiverLink(){
+  navigator.clipboard.writeText(RECV_URL).then(()=>toast('Link copied','ok'));
+}
+
+// ── Drag & drop ───────────────────────────────────────────────────────────────
+const dz = document.getElementById('drop-zone');
+const fi = document.getElementById('file-input');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+dz.addEventListener('drop',e=>{
+  e.preventDefault();dz.classList.remove('over');
+  if(e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+});
+fi.addEventListener('change',()=>{if(fi.files.length){uploadFiles(fi.files);fi.value='';}});
+</script>
+</body>
+</html>

@@ -3,227 +3,324 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>droply — enter PIN</title>
+  <title>droply — sign in</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0a0a0f; --surface: #13131a; --border: #1e1e2e;
-      --accent: #7c6aff; --accent-dim: #4a3faa;
-      --text: #e8e6f0; --muted: #6b6880; --error: #ff6b6b;
-      --mono: 'DM Mono', monospace; --sans: 'Syne', sans-serif;
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0a0a0f;--surface:#13131a;--border:#1e1e2e;--border2:#2a2a3e;
+      --accent:#7c6aff;--accent-dim:#4a3faa;
+      --success:#4ade80;--error:#ff6b6b;
+      --text:#e8e6f0;--muted:#6b6880;
+      --mono:'DM Mono',monospace;--sans:'Syne',sans-serif;
     }
-    body {
-      font-family: var(--sans); background: var(--bg); color: var(--text);
-      min-height: 100vh; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; padding: 2rem;
+    body{
+      font-family:var(--sans);background:var(--bg);color:var(--text);
+      min-height:100vh;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;padding:2rem;
     }
-    body::before {
-      content: ''; position: fixed; inset: 0;
+    body::before{
+      content:'';position:fixed;inset:0;
       background-image:
-        linear-gradient(rgba(124,106,255,.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(124,106,255,.03) 1px, transparent 1px);
-      background-size: 40px 40px; pointer-events: none;
-    }
-    .logo {
-      font-size: 13px; letter-spacing: 0.25em; text-transform: uppercase;
-      color: var(--accent); font-family: var(--mono); margin-bottom: 2.5rem;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .logo-dot {
-      width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
-      animation: pulse 2s ease-in-out infinite;
-    }
-    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
-
-    .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 2.5rem 2rem;
-      width: 100%; max-width: 380px; text-align: center;
-    }
-    h1 { font-size: 1.5rem; font-weight: 800; margin-bottom: .4rem; letter-spacing: -.02em; }
-    .subtitle { font-size: 13px; color: var(--muted); font-family: var(--mono); margin-bottom: 2rem; }
-
-    .error-msg {
-      font-family: var(--mono); font-size: 12px; color: var(--error);
-      margin-bottom: 1.2rem; padding: 8px 12px;
-      background: rgba(255,107,107,.08); border-radius: 8px;
-      border: 1px solid rgba(255,107,107,.2);
+        linear-gradient(rgba(124,106,255,.03) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(124,106,255,.03) 1px,transparent 1px);
+      background-size:40px 40px;pointer-events:none;
     }
 
-    /* ── PIN boxes ── */
-    .pin-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 1.5rem; }
-    .pin-digit {
-      width: 46px; height: 58px; background: var(--bg); border: 1px solid var(--border);
-      border-radius: 10px; font-family: var(--mono); font-size: 1.6rem; font-weight: 500;
-      color: var(--text); text-align: center; outline: none;
-      transition: border-color .15s, box-shadow .15s; -webkit-appearance: none;
-    }
-    .pin-digit:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,106,255,.15); }
-    .pin-digit.filled { border-color: var(--accent-dim); color: var(--accent); }
+    .logo{font-family:var(--mono);font-size:13px;letter-spacing:.25em;text-transform:uppercase;
+          color:var(--accent);margin-bottom:2.5rem;display:flex;align-items:center;gap:8px;}
+    .logo-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
+              animation:pulse 2s ease-in-out infinite;}
+    @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
 
-    /* ── Manual entry fallback (shown if JS fails) ── */
-    .manual-row { margin-top: .75rem; display: none; }
-    .manual-row input {
-      width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border);
-      border-radius: 8px; color: var(--text); font-family: var(--mono);
-      font-size: 1.2rem; text-align: center; letter-spacing: .3em; outline: none;
-    }
-    .manual-row input:focus { border-color: var(--accent); }
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:20px;
+          padding:2.5rem 2rem;width:100%;max-width:400px;}
 
-    button[type="submit"] {
-      width: 100%; padding: 14px; background: var(--accent); color: #fff;
-      border: none; border-radius: 10px; font-family: var(--sans); font-size: 15px;
-      font-weight: 700; cursor: pointer; transition: background .15s, transform .1s;
+    /* ── Role toggle ── */
+    .role-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:2rem;}
+    .role-btn{
+      border:1.5px solid var(--border);border-radius:12px;padding:1rem .75rem;
+      background:none;cursor:pointer;transition:all .18s;text-align:center;
+      display:flex;flex-direction:column;align-items:center;gap:6px;
     }
-    button[type="submit"]:hover { background: #8f7fff; }
-    button[type="submit"]:active { transform: scale(.98); }
-    button[type="submit"]:disabled { background: var(--accent-dim); cursor: not-allowed; }
-
-    .hint { margin-top: 1.5rem; font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.6; }
-
-    /* show PIN display for dev — can remove in prod */
-    .dev-note {
-      margin-top: 1rem; font-family: var(--mono); font-size: 10px;
-      color: var(--muted); opacity: .5;
+    .role-btn:hover{border-color:var(--border2);background:rgba(255,255,255,.02);}
+    .role-btn.active.receiver{
+      border-color:var(--success);background:rgba(74,222,128,.06);
     }
+    .role-btn.active.sender{
+      border-color:var(--accent);background:rgba(124,106,255,.08);
+    }
+    .role-icon{font-size:24px;line-height:1;}
+    .role-name{font-family:var(--sans);font-size:13px;font-weight:700;
+               color:var(--text);line-height:1.2;}
+    .role-desc{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.4;}
+
+    /* ── Credential section ── */
+    .cred-section{animation:fade-in .2s ease;}
+    @keyframes fade-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+    .cred-label{font-family:var(--mono);font-size:11px;color:var(--muted);
+                margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+    .cred-dot{width:5px;height:5px;border-radius:50%;}
+    .cred-dot.receiver{background:var(--success);}
+    .cred-dot.sender  {background:var(--accent);}
+
+    /* PIN boxes */
+    .pin-row{display:flex;gap:8px;justify-content:center;margin-bottom:1.25rem;}
+    .pin-digit{
+      width:46px;height:58px;background:var(--bg);border:1px solid var(--border);
+      border-radius:10px;font-family:var(--mono);font-size:1.6rem;font-weight:500;
+      color:var(--text);text-align:center;outline:none;
+      transition:border-color .15s,box-shadow .15s;-webkit-appearance:none;
+    }
+    .pin-digit:focus{border-color:var(--success);box-shadow:0 0 0 3px rgba(74,222,128,.12);}
+    .pin-digit.filled{border-color:rgba(74,222,128,.5);color:var(--success);}
+
+    /* Password input */
+    .pw-wrap{position:relative;margin-bottom:1.25rem;}
+    .pw-input{
+      width:100%;padding:12px 42px 12px 14px;background:var(--bg);
+      border:1px solid var(--border);border-radius:10px;color:var(--text);
+      font-family:var(--mono);font-size:14px;outline:none;
+      transition:border-color .15s,box-shadow .15s;
+    }
+    .pw-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,106,255,.12);}
+    .pw-toggle{
+      position:absolute;right:12px;top:50%;transform:translateY(-50%);
+      background:none;border:none;cursor:pointer;color:var(--muted);
+      font-size:16px;padding:2px;transition:color .15s;
+    }
+    .pw-toggle:hover{color:var(--text);}
+
+    .error-msg{
+      font-family:var(--mono);font-size:12px;color:var(--error);
+      margin-bottom:1.2rem;padding:8px 12px;
+      background:rgba(255,107,107,.08);border-radius:8px;
+      border:1px solid rgba(255,107,107,.2);
+    }
+
+    /* Submit */
+    .submit-btn{
+      width:100%;padding:14px;border:none;border-radius:10px;
+      font-family:var(--sans);font-size:15px;font-weight:700;cursor:pointer;
+      transition:background .15s,transform .1s;
+    }
+    .submit-btn.receiver{background:var(--success);color:#0a0a0f;}
+    .submit-btn.sender  {background:var(--accent); color:#fff;}
+    .submit-btn:hover{filter:brightness(1.08);}
+    .submit-btn:active{transform:scale(.98);}
+    .submit-btn:disabled{opacity:.45;cursor:not-allowed;}
+
+    .hint{margin-top:1.25rem;font-family:var(--mono);font-size:11px;
+          color:var(--muted);line-height:1.65;text-align:center;}
+    .hint span{opacity:.6;}
+
+    /* divider */
+    .divider{height:1px;background:var(--border);margin:1.5rem 0;}
   </style>
 </head>
 <body>
   <div class="logo"><span class="logo-dot"></span>droply</div>
 
   <div class="card">
-    <h1>Enter PIN</h1>
-    <p class="subtitle">Get the 6-digit PIN from the sender</p>
+
+    <!-- Step 1: pick a role -->
+    <div class="role-row" id="role-row">
+      <button type="button" class="role-btn receiver active" id="btn-receiver"
+              onclick="selectRole('receiver')">
+        <span class="role-icon">📥</span>
+        <span class="role-name">Receiver</span>
+        <span class="role-desc">Download files<br>Enter 6-digit PIN</span>
+      </button>
+      <button type="button" class="role-btn sender" id="btn-sender"
+              onclick="selectRole('sender')">
+        <span class="role-icon">📤</span>
+        <span class="role-name">Sender</span>
+        <span class="role-desc">Upload &amp; share<br>Enter your password</span>
+      </button>
+    </div>
 
     {% if error %}
     <div class="error-msg">{{ error }}</div>
     {% endif %}
 
-    <form method="POST" action="/login" id="pin-form">
-      <!-- next_page tells server whether to redirect to /receive or / after login -->
-      <input type="hidden" name="next_page" value="{{ next_page }}">
-      <!-- Combined PIN value — filled by JS from the boxes below -->
-      <input type="hidden" name="pin" id="pin-value">
+    <form method="POST" action="/login" id="login-form">
+      <input type="hidden" name="role"      id="role-field"     value="receiver">
+      <input type="hidden" name="credential" id="credential-field" value="">
+      <input type="hidden" name="next_page"  value="{{ next_page }}">
 
-      <!-- 6 visual digit boxes -->
-      <div class="pin-row" id="pin-boxes">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
-               autocomplete="off" data-idx="0">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
-               autocomplete="off" data-idx="1">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
-               autocomplete="off" data-idx="2">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
-               autocomplete="off" data-idx="3">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
-               autocomplete="off" data-idx="4">
-        <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
-               autocomplete="off" data-idx="5">
+      <!-- ── Receiver: PIN boxes ── -->
+      <div class="cred-section" id="section-receiver">
+        <div class="cred-label">
+          <span class="cred-dot receiver"></span>
+          Enter the 6-digit PIN from the sender
+        </div>
+        <div class="pin-row" id="pin-boxes">
+          <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+                 autocomplete="off" data-idx="0">
+          <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+                 autocomplete="off" data-idx="1">
+          <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+                 autocomplete="off" data-idx="2">
+          <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+                 autocomplete="off" data-idx="3">
+          <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+                 autocomplete="off" data-idx="4">
+          <input class="pin-digit" maxlength="1" inputmode="numeric" pattern="[0-9]"
+                 autocomplete="off" data-idx="5">
+        </div>
       </div>
 
-      <!-- Fallback: plain text box shown if JS fails -->
-      <div class="manual-row" id="manual-row">
-        <input type="text" id="manual-pin" maxlength="6" inputmode="numeric"
-               placeholder="······" autocomplete="off">
+      <!-- ── Sender: password ── -->
+      <div class="cred-section" id="section-sender" style="display:none">
+        <div class="cred-label">
+          <span class="cred-dot sender"></span>
+          Enter your sender password
+        </div>
+        <div class="pw-wrap">
+          <input class="pw-input" type="password" id="pw-input"
+                 placeholder="word-word-word-0000" autocomplete="current-password"
+                 oninput="document.getElementById('credential-field').value=this.value">
+          <button type="button" class="pw-toggle" id="pw-toggle"
+                  onclick="togglePw()" title="Show/hide password">👁</button>
+        </div>
       </div>
 
-      <button type="submit" id="submit-btn">Connect →</button>
+      <button type="submit" class="submit-btn receiver" id="submit-btn">
+        Connect as receiver →
+      </button>
     </form>
 
-    <p class="hint">5 wrong attempts locks you out for 60 seconds.</p>
+    <p class="hint" id="hint-text">
+      <span>Receiver PIN comes from the person running droply.</span>
+    </p>
   </div>
 
   <script>
-    const digits   = Array.from(document.querySelectorAll('.pin-digit'));
-    const pinValue = document.getElementById('pin-value');
-    const form     = document.getElementById('pin-form');
-    const submitBtn = document.getElementById('submit-btn');
+  // ── Role switching ─────────────────────────────────────────────────────────
+  let currentRole = 'receiver';
 
-    function syncPin() {
-      pinValue.value = digits.map(d => d.value).join('');
-    }
+  function selectRole(role) {
+    currentRole = role;
+    document.getElementById('role-field').value = role;
 
-    function tryAutoSubmit() {
-      syncPin();
-      if (pinValue.value.length === 6) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Connecting…';
-        // Small delay so the last digit visually fills before submit
-        setTimeout(() => form.submit(), 150);
-      }
-    }
-
-    digits.forEach((box, i) => {
-      box.addEventListener('keydown', e => {
-        // Backspace on empty → go back
-        if (e.key === 'Backspace' && !box.value && i > 0) {
-          e.preventDefault();
-          digits[i - 1].value = '';
-          digits[i - 1].classList.remove('filled');
-          digits[i - 1].focus();
-          syncPin();
-        }
-        // Left/right arrow navigation
-        if (e.key === 'ArrowLeft' && i > 0) digits[i - 1].focus();
-        if (e.key === 'ArrowRight' && i < 5) digits[i + 1].focus();
-      });
-
-      box.addEventListener('input', () => {
-        // Strip non-digits, keep only last char
-        box.value = box.value.replace(/\D/g, '').slice(-1);
-        if (box.value) {
-          box.classList.add('filled');
-          if (i < 5) digits[i + 1].focus();
-        } else {
-          box.classList.remove('filled');
-        }
-        tryAutoSubmit();
-      });
-
-      // Handle mobile autocomplete / autofill filling multiple digits at once
-      box.addEventListener('keyup', () => {
-        if (box.value.length > 1) {
-          const chars = box.value.replace(/\D/g, '').split('');
-          chars.forEach((ch, offset) => {
-            if (digits[i + offset]) {
-              digits[i + offset].value = ch;
-              digits[i + offset].classList.add('filled');
-            }
-          });
-          box.value = box.value[0];
-          tryAutoSubmit();
-        }
-      });
+    // Toggle button styles
+    ['receiver','sender'].forEach(r => {
+      const btn = document.getElementById(`btn-${r}`);
+      btn.className = `role-btn ${r}${r === role ? ' active' : ''}`;
     });
 
-    // Paste: works whether focused on a box or anywhere on the page
-    document.addEventListener('paste', e => {
-      e.preventDefault();
-      const text = (e.clipboardData || window.clipboardData)
-                    .getData('text').replace(/\D/g, '').slice(0, 6);
-      digits.forEach((d, i) => {
-        d.value = text[i] || '';
-        d.classList.toggle('filled', !!text[i]);
-      });
+    // Toggle sections
+    document.getElementById('section-receiver').style.display =
+      role === 'receiver' ? 'block' : 'none';
+    document.getElementById('section-sender').style.display =
+      role === 'sender' ? 'block' : 'none';
+
+    // Update submit button
+    const sub  = document.getElementById('submit-btn');
+    const hint = document.getElementById('hint-text');
+    if (role === 'receiver') {
+      sub.className   = 'submit-btn receiver';
+      sub.textContent = 'Connect as receiver →';
+      hint.innerHTML  = '<span>Receiver PIN comes from the person running droply.</span>';
+      document.getElementById('credential-field').value = '';
+      setTimeout(() => document.querySelector('.pin-digit').focus(), 50);
+    } else {
+      sub.className   = 'submit-btn sender';
+      sub.textContent = 'Sign in as sender →';
+      hint.innerHTML  = '<span>Sender password is shown in the droply terminal on startup.</span>';
+      setTimeout(() => document.getElementById('pw-input').focus(), 50);
+    }
+  }
+
+  // ── PIN boxes ──────────────────────────────────────────────────────────────
+  const digits = Array.from(document.querySelectorAll('.pin-digit'));
+  const credField = document.getElementById('credential-field');
+
+  function syncPin() {
+    if (currentRole === 'receiver') {
+      credField.value = digits.map(d => d.value).join('');
+    }
+  }
+
+  function tryAutoSubmit() {
+    syncPin();
+    if (currentRole === 'receiver' && credField.value.length === 6) {
+      const btn = document.getElementById('submit-btn');
+      btn.disabled    = true;
+      btn.textContent = 'Connecting…';
+      setTimeout(() => document.getElementById('login-form').submit(), 150);
+    }
+  }
+
+  digits.forEach((box, i) => {
+    box.addEventListener('keydown', e => {
+      if (e.key === 'Backspace' && !box.value && i > 0) {
+        e.preventDefault();
+        digits[i-1].value = '';
+        digits[i-1].classList.remove('filled');
+        digits[i-1].focus();
+        syncPin();
+      }
+      if (e.key === 'ArrowLeft'  && i > 0) digits[i-1].focus();
+      if (e.key === 'ArrowRight' && i < 5) digits[i+1].focus();
+    });
+
+    box.addEventListener('input', () => {
+      box.value = box.value.replace(/\D/g,'').slice(-1);
+      box.classList.toggle('filled', !!box.value);
+      if (box.value && i < 5) digits[i+1].focus();
       tryAutoSubmit();
     });
+  });
 
-    // Validate pin value is set before manual submit (button click)
-    form.addEventListener('submit', e => {
-      syncPin();
-      if (pinValue.value.length !== 6) {
-        e.preventDefault();
-        // Highlight incomplete boxes
-        digits.forEach(d => {
-          if (!d.value) d.style.borderColor = 'var(--error)';
-        });
-        setTimeout(() => digits.forEach(d => d.style.borderColor = ''), 1000);
-      }
+  // Paste handler
+  document.addEventListener('paste', e => {
+    if (currentRole !== 'receiver') return;
+    e.preventDefault();
+    const text = (e.clipboardData||window.clipboardData)
+                   .getData('text').replace(/\D/g,'').slice(0,6);
+    digits.forEach((d,i) => {
+      d.value = text[i] || '';
+      d.classList.toggle('filled', !!text[i]);
     });
+    tryAutoSubmit();
+  });
 
-    // Focus first box on load
-    digits[0].focus();
+  // Form submit validation
+  document.getElementById('login-form').addEventListener('submit', e => {
+    syncPin();
+    if (currentRole === 'receiver' && credField.value.length !== 6) {
+      e.preventDefault();
+      digits.forEach(d => { if (!d.value) d.style.borderColor = 'var(--error)'; });
+      setTimeout(() => digits.forEach(d => d.style.borderColor = ''), 1000);
+    }
+    if (currentRole === 'sender' && !credField.value.trim()) {
+      e.preventDefault();
+      document.getElementById('pw-input').style.borderColor = 'var(--error)';
+      setTimeout(() => document.getElementById('pw-input').style.borderColor = '', 1000);
+    }
+  });
+
+  // ── Password toggle ────────────────────────────────────────────────────────
+  function togglePw() {
+    const inp = document.getElementById('pw-input');
+    inp.type  = inp.type === 'password' ? 'text' : 'password';
+  }
+
+  // ── Auto-select role from URL param ───────────────────────────────────────
+  // If URL is /receive → pre-select receiver; if / → pre-select sender
+  const nextPage = document.querySelector('[name=next_page]').value;
+  if (nextPage === 'receive') {
+    selectRole('receiver');
+  } else if (!nextPage) {
+    // Default: receiver for /login directly, sender for / redirect
+    const ref = document.referrer;
+    // keep receiver as default
+  }
+
+  // Focus first PIN box on load
+  document.querySelector('.pin-digit').focus();
   </script>
 </body>
 </html>

@@ -63,7 +63,6 @@ from flask import (Flask, request, session, jsonify,
                    render_template, redirect, url_for, Response, abort)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import threading as _threading
 
 try:
     from flask_sock import Sock
@@ -72,14 +71,41 @@ except ImportError:
     HAS_SOCK = False
 
 # ── Version ───────────────────────────────────────────────────────────────────
-VERSION = "0.3.0-phase2"
+VERSION = "0.5.0-roles"
 
 # ── UTC helper ────────────────────────────────────────────────────────────────
 def utcnow():
     return datetime.now(timezone.utc)
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).parent
+# ── Paths — packaging-aware ───────────────────────────────────────────────────
+# WHY: PyInstaller freezes the app into a temp dir (_MEIPASS) at runtime.
+#      __file__ inside a frozen exe points into that read-only bundle —
+#      we cannot write uploads or logs there.
+#
+#      Rule:
+#        BUNDLE_DIR  = read-only — templates, static assets (inside the exe)
+#        DATA_DIR    = read-write — uploads, logs, certs, meta (next to the exe)
+#
+#      When running normally (python server.py), DATA_DIR == the script folder.
+#      When frozen (droply.exe), DATA_DIR == the folder containing the exe.
+
+def _frozen() -> bool:
+    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+
+def _bundle_dir() -> Path:
+    """Read-only: where templates/static live inside the bundle."""
+    if _frozen():
+        return Path(sys._MEIPASS)
+    return Path(__file__).parent
+
+def _data_dir() -> Path:
+    """Read-write: where uploads/logs/certs live, always next to the exe."""
+    if _frozen():
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+BUNDLE_DIR = _bundle_dir()
+BASE_DIR   = _data_dir()          # all writable paths hang off this
 UPLOAD_DIR = BASE_DIR / "uploads"
 LOG_DIR    = BASE_DIR / "logs"
 CERT_FILE  = BASE_DIR / "cert.pem"
@@ -113,7 +139,15 @@ log = logging.getLogger("droply")
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # ── Flask + extensions ────────────────────────────────────────────────────────
-app = Flask(__name__, template_folder="templates", static_folder="static")
+# WHY: In a frozen exe __name__ is "__main__" and the default template/static
+# paths resolve relative to the exe (DATA_DIR) — but templates are bundled
+# inside _MEIPASS (BUNDLE_DIR). Pass absolute paths so Flask finds them
+# whether running frozen or from source.
+app = Flask(
+    __name__,
+    template_folder=str(BUNDLE_DIR / "templates"),
+    static_folder=str(BUNDLE_DIR / "static"),
+)
 app.secret_key = secrets.token_hex(32)
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=SESSION_TIMEOUT)
@@ -155,8 +189,11 @@ def handle_options():
         return Response("", 204, headers=CORS_HEADERS)
 
 # ── Global state ──────────────────────────────────────────────────────────────
-CURRENT_PIN:   str   = ""
-BIND_IP:       str   = ""          # set at startup from --bind or auto-detect
+CURRENT_PIN:      str  = ""   # 6-digit PIN shared with receivers
+SENDER_PASSWORD:  str  = ""   # separate password known only to the sender
+                               # auto-generated at startup; shown in terminal
+                               # can be overridden via --sender-password flag
+BIND_IP:          str  = ""   # set at startup from --bind or auto-detect
 START_TIME:    float = time.time()
 file_meta:     dict  = {}
 meta_lock            = threading.Lock()
@@ -272,7 +309,28 @@ def disk_free_gb() -> float:
 # ── File helpers ──────────────────────────────────────────────────────────────
 
 def generate_pin() -> str:
+    """6-digit numeric PIN — shared openly with receivers."""
     return "".join(str(secrets.randbelow(10)) for _ in range(PIN_LENGTH))
+
+def generate_sender_password() -> str:
+    """
+    Sender-only password shown only in the terminal.
+    WHY: The PIN is shared openly (via QR, voice, chat).
+         The sender password is different — it's what the person
+         *running* droply types to get upload/delete permissions.
+         Format: 3 random words + 4 digits (memorable but hard to guess).
+         e.g.  tiger-cloud-nine-4821
+    """
+    words = [
+        "alpha","bravo","delta","echo","foxtrot","golf","hotel",
+        "india","kilo","lima","mango","nova","oscar","papa","quick",
+        "romeo","sierra","tango","ultra","victor","whisky","xray",
+        "yankee","zebra","pixel","cloud","storm","river","solar","lunar",
+        "swift","brave","tiger","stone","flame","frost","spark","blade",
+    ]
+    w = [secrets.choice(words) for _ in range(3)]
+    n = secrets.randbelow(9000) + 1000
+    return f"{w[0]}-{w[1]}-{w[2]}-{n}"
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -478,15 +536,47 @@ def start_mdns(port: int):
         log.warning(f"mDNS failed: {e}")
         return None
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Auth & role decorators ────────────────────────────────────────────────────
+#
+# ROLES
+# ─────
+#   session["role"] == "sender"    set when sender password is correct
+#                                  → can upload, delete, view transfers
+#   session["role"] == "receiver"  set when PIN is correct
+#                                  → can only list files and download
+#
+# Both roles require authentication (session["authenticated"] == True).
+# require_pin   → any authenticated session (sender or receiver)
+# require_sender → sender role only
 
 def require_pin(f):
+    """Allow any authenticated user (sender or receiver)."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("authenticated"):
             if request.path.startswith("/api/"):
                 return jsonify({"error": "Not authenticated"}), 401
             return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+def require_sender(f):
+    """
+    Allow only the sender role.
+    WHY: Upload, delete, and transfer-log are sender-only operations.
+         A receiver authenticating with the PIN should NOT be able to
+         delete files or see who else downloaded what.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("authenticated"):
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Not authenticated"}), 401
+            return redirect(url_for("login"))
+        if session.get("role") != "sender":
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Sender role required"}), 403
+            return redirect(url_for("login", error="sender_only"))
         return f(*args, **kwargs)
     return decorated
 
@@ -507,20 +597,45 @@ def receive():
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute")
 def login():
+    """
+    Two-mode login.
+    role=sender   → checks SENDER_PASSWORD  → lands on /  (dashboard)
+    role=receiver → checks CURRENT_PIN      → lands on /receive
+    The role is stored in the session so every subsequent request
+    knows what the user is allowed to do.
+    """
     error     = None
     next_page = request.args.get("next", "")
+    # propagate error query param (e.g. sender_only redirect)
+    if request.args.get("error") == "sender_only":
+        error = "That page requires the sender password."
+
     if request.method == "POST":
-        pin       = request.form.get("pin", "").strip()
+        role      = request.form.get("role", "receiver").strip()
+        credential= request.form.get("credential", "").strip()
         next_page = request.form.get("next_page", "")
-        if secrets.compare_digest(pin, CURRENT_PIN):
-            session.permanent    = True
-            session["authenticated"] = True
-            session["auth_time"] = utcnow().isoformat()
-            log.info(f"Auth OK from {request.remote_addr}")
-            return redirect(url_for("receive") if next_page == "receive" else url_for("index"))
+
+        if role == "sender":
+            ok = secrets.compare_digest(credential, SENDER_PASSWORD)
         else:
-            log.warning(f"Auth FAIL from {request.remote_addr}")
-            error = "Wrong PIN. Try again."
+            ok = secrets.compare_digest(credential, CURRENT_PIN)
+
+        if ok:
+            session.permanent        = True
+            session["authenticated"] = True
+            session["role"]          = role
+            session["auth_time"]     = utcnow().isoformat()
+            log.info(f"Auth OK role={role} from {request.remote_addr}")
+            # Sender always goes to dashboard; receiver always goes to /receive
+            dest = url_for("index") if role == "sender" else url_for("receive")
+            return redirect(dest)
+        else:
+            log.warning(f"Auth FAIL role={role} from {request.remote_addr}")
+            error = (
+                "Wrong sender password." if role == "sender"
+                else "Wrong PIN. Ask the sender for the 6-digit PIN."
+            )
+
     return render_template("login.html", error=error, next_page=next_page)
 
 @app.route("/logout")
@@ -612,7 +727,7 @@ def list_files():
 # ── API: upload ───────────────────────────────────────────────────────────────
 
 @app.route("/api/upload", methods=["POST"])
-@require_pin
+@require_sender
 @limiter.limit("30 per minute")
 def upload_file():
     if "file" not in request.files:
@@ -682,7 +797,7 @@ def upload_file():
 # ── API: share-path ───────────────────────────────────────────────────────────
 
 @app.route("/api/share-path", methods=["POST"])
-@require_pin
+@require_sender
 def share_path():
     data     = request.get_json(silent=True) or {}
     raw_path = data.get("path", "").strip()
@@ -829,7 +944,7 @@ def download_by_token(token: str):
 # ── API: delete ───────────────────────────────────────────────────────────────
 
 @app.route("/api/delete/<file_id>", methods=["DELETE"])
-@require_pin
+@require_sender
 def delete_file(file_id: str):
     with meta_lock:
         meta = file_meta.pop(file_id, None)
@@ -868,7 +983,7 @@ def status():
 # ── API: transfers ────────────────────────────────────────────────────────────
 
 @app.route("/api/transfers")
-@require_pin
+@require_sender
 def transfers():
     return jsonify({"transfers": list(transfer_log)})
 
@@ -892,7 +1007,7 @@ def info():
 # ── MINOR CHANGE 4: /api/debug ────────────────────────────────────────────────
 
 @app.route("/api/debug")
-@require_pin
+@require_sender
 def debug():
     """
     Diagnostics endpoint.
@@ -954,9 +1069,12 @@ def e500(e): return jsonify({"error": "Server error"}), 500
 # ── Startup ───────────────────────────────────────────────────────────────────
 
 def startup(port: int, use_https: bool):
-    global CURRENT_PIN
+    global CURRENT_PIN, SENDER_PASSWORD
     load_meta()
-    CURRENT_PIN = generate_pin()
+    CURRENT_PIN     = generate_pin()
+    # Only generate a new sender password if one hasn't been set via --sender-password flag
+    if not SENDER_PASSWORD:
+        SENDER_PASSWORD = generate_sender_password()
 
     ip     = get_local_ip()
     scheme = "https" if use_https else "http"
@@ -972,8 +1090,11 @@ def startup(port: int, use_https: bool):
     print(f"  droply {VERSION}")
     print("═"*62)
     print(f"  Sender   : {url}")
-    print(f"  Receiver : {url}/receive   ← share this")
-    print(f"  PIN      : {CURRENT_PIN}      ← share this")
+    print(f"  Receiver : {url}/receive   ← share this link + PIN")
+    print(f"")
+    print(f"  Receiver PIN     : {CURRENT_PIN}   ← share this with receivers")
+    print(f"  Sender password  : {SENDER_PASSWORD}")
+    print(f"  (keep the sender password private — it controls upload/delete)")
     print(f"  HTTPS    : {'yes' if use_https else 'no (--http mode)'}")
     print(f"  WebSocket: {'yes (flask-sock)' if HAS_SOCK else 'no (pip install flask-sock)'}")
     print(f"  Max file : {MAX_FILE_SIZE//(1024**3)} GB")
@@ -986,14 +1107,14 @@ def startup(port: int, use_https: bool):
     start_mdns(port)
 
     def bye(sig, frame):
-        print("\\ndroply: shutting down")
+        print("\ndroply: shutting down")
         sys.exit(0)
     # Signal handlers only work in the main thread.
     # When started from launcher.py the server runs in a background thread —
     # skip signal registration in that case (launcher handles shutdown via tray Quit).
+    import threading as _threading
     if _threading.current_thread() is _threading.main_thread():
         signal.signal(signal.SIGINT, bye)
-
 
     bind = BIND_IP if BIND_IP else "0.0.0.0"
     ssl_ctx = (str(CERT_FILE), str(KEY_FILE)) if use_https else None
@@ -1006,11 +1127,12 @@ def run_tests():
     import requests, tempfile, threading as _th
     requests.packages.urllib3.disable_warnings()
 
-    global CURRENT_PIN, BIND_IP
-    PORT     = 15433
-    BIND_IP  = "127.0.0.1"
+    global CURRENT_PIN, SENDER_PASSWORD, BIND_IP
+    PORT            = 15433
+    BIND_IP         = "127.0.0.1"
     os.environ["PORT"] = str(PORT)
-    CURRENT_PIN = generate_pin()
+    CURRENT_PIN     = generate_pin()
+    SENDER_PASSWORD = "test-sender-pass-9999"
     load_meta()
 
     t = _th.Thread(
@@ -1045,11 +1167,16 @@ def run_tests():
     r = sess.get(f"{base}/api/files")
     check("T03 /api/files unauth → 401", r.status_code == 401)
 
-    r = sess.post(f"{base}/login", data={"pin": "000000"}, allow_redirects=False)
+    r = sess.post(f"{base}/login",
+                  data={"role": "receiver", "credential": "000000"}, allow_redirects=False)
     check("T04 wrong PIN stays on login", r.status_code in (200, 302))
 
-    r = sess.post(f"{base}/login", data={"pin": CURRENT_PIN, "next_page": ""}, allow_redirects=True)
-    check("T05 correct PIN → 200", r.status_code == 200)
+    # Login as SENDER (uses sender password)
+    r = sess.post(f"{base}/login",
+                  data={"role": "sender", "credential": SENDER_PASSWORD, "next_page": ""},
+                  allow_redirects=True)
+    check("T05 sender login → 200", r.status_code == 200)
+    check("T05b sender role in session", "droply" in r.text.lower() or r.status_code == 200)
 
     r = sess.get(f"{base}/api/files")
     check("T06 file list authenticated", r.status_code == 200)
@@ -1157,10 +1284,40 @@ def run_tests():
     check("T40 debug has disk_free_gb",   "disk_free_gb" in d)
     check("T41 debug has ws_available",   "ws_available" in d)
 
+    # ── Role separation tests ─────────────────────────────────────────────────
+    recv_sess = requests.Session()
+    # Login as receiver
+    recv_sess.post(f"{base}/login",
+                   data={"role": "receiver", "credential": CURRENT_PIN, "next_page": ""},
+                   allow_redirects=True)
+
+    # Receiver CAN list files and download
+    r = recv_sess.get(f"{base}/api/files")
+    check("T38b receiver can list files", r.status_code == 200)
+
+    # Receiver CANNOT upload
+    import io
+    r = recv_sess.post(f"{base}/api/upload",
+                       files={"file": ("evil.txt", io.BytesIO(b"evil"), "text/plain")},
+                       data={"ttl_hours": "1"})
+    check("T39b receiver upload blocked → 403", r.status_code == 403)
+
+    # Receiver CANNOT delete
+    r = recv_sess.delete(f"{base}/api/delete/nonexistent")
+    check("T40b receiver delete blocked → 403", r.status_code == 403)
+
+    # Receiver CANNOT see transfer log
+    r = recv_sess.get(f"{base}/api/transfers")
+    check("T41b receiver transfers blocked → 403", r.status_code == 403)
+
+    # Sender CAN still do everything
+    r = sess.get(f"{base}/api/transfers")
+    check("T41c sender transfers allowed", r.status_code == 200)
+
     # Rate limiter
     for _ in range(5):
-        sess.post(f"{base}/login", data={"pin": "000000"})
-    r = sess.post(f"{base}/login", data={"pin": "000000"})
+        sess.post(f"{base}/login", data={"role":"receiver","credential": "000000"})
+    r = sess.post(f"{base}/login", data={"role":"receiver","credential": "000000"})
     check("T42 rate limiter 429", r.status_code == 429)
 
     # Delete
@@ -1187,11 +1344,14 @@ if __name__ == "__main__":
     parser.add_argument("--port",  type=int, default=5000)
     parser.add_argument("--bind",  type=str, default="",
                         help="Force bind IP, e.g. --bind 192.168.1.42  (default: auto-detect)")
+    parser.add_argument("--sender-password", type=str, default="",
+                        help="Override the auto-generated sender password")
     parser.add_argument("--test",  action="store_true", help="Run test suite and exit")
     args = parser.parse_args()
 
-    # MAJOR CHANGE 1: --bind
     BIND_IP = args.bind.strip()
+    if args.sender_password:
+        SENDER_PASSWORD = args.sender_password.strip()
     os.environ["PORT"] = str(args.port)
 
     if args.http:

@@ -1,5 +1,17 @@
+# droply runtime dependencies
 flask>=3.0.0
 flask-limiter>=3.5.0
+flask-sock>=0.7.0
 cryptography>=41.0.0
 qrcode[pil]>=7.4.2
 Pillow>=10.0.0
+
+# packaging (build only — not needed to run server.py directly)
+pyinstaller>=6.0.0
+pystray>=0.19.0
+
+# optional — enables mDNS (droply.local) discovery
+# zeroconf>=0.115.0
+
+# dev / testing
+requests>=2.31.0
