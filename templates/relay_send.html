@@ -203,9 +203,15 @@ function fileIcon(n){
   const m={pdf:'📄',mp4:'🎬',mp3:'🎵',jpg:'🖼',png:'🖼',zip:'📦',doc:'📝',txt:'📃'};
   return m[e]||'📁';
 }
-function makeQR(url){
-  const src=`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
-  return `<img src="${src}" alt="QR code for ${url}">`;
+async function makeQR(url){
+  // Use relay's own /api/qr endpoint — no external internet call needed
+  try {
+    const r = await fetch(`/api/qr?url=${encodeURIComponent(url)}`);
+    const d = await r.json();
+    if (d.qr) return `<img src="${d.qr}" alt="QR code" style="border-radius:6px;">`;
+  } catch(_) {}
+  // fallback: just show the URL as text
+  return `<p style="font-family:var(--mono);font-size:11px;word-break:break-all;color:var(--muted)">${url}</p>`;
 }
 
 // ── Create session ────────────────────────────────────────────────────────────
@@ -225,8 +231,9 @@ async function createSession(){
       pin.split('').map(c=>`<div class="pin-char">${c}</div>`).join('');
 
     // QR
+    const qrHtml = await makeQR(RECV_URL);
     document.getElementById('qr-wrap').innerHTML =
-      makeQR(RECV_URL) + `<p class="qr-url">${RECV_URL}</p>`;
+      qrHtml + `<p class="qr-url">${RECV_URL}</p>`;
 
     document.getElementById('recv-url').textContent = RECV_URL;
     document.getElementById('expires-at').textContent =

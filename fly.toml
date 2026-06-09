@@ -15,13 +15,13 @@ primary_region = "sin"   # Singapore — change to closest region: lhr, iad, fra
   # Uses Dockerfile if present, else nixpacks auto-detect (Python)
 
 [env]
-  PORT            = "8080"
+  PORT            = "8765"
   SESSION_TTL_SEC = "7200"
   CHUNK_SIZE_BYTES = "2097152"
   MAX_FILE_SIZE   = "5368709120"
 
 [http_service]
-  internal_port    = 8080
+  internal_port    = 8765
   force_https      = true
   auto_stop_machines  = true
   auto_start_machines = true

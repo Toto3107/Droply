@@ -143,11 +143,25 @@ def section_a_infra(r: TestRunner):
     r.check("A01 /health returns 200", resp.status_code == 200)
     r.check("A02 /health ok=true", resp.json().get("ok") is True)
 
-    resp = r.get("/")
-    r.check("A03 index returns 200", resp.status_code == 200)
+    resp = r.get("/", allow_redirects=False)
+    r.check("A03 root redirects to /send", resp.status_code in (301, 302))
+
+    resp = r.get("/api/info")
+    r.check("A04 /api/info returns 200", resp.status_code == 200)
     d = resp.json()
-    r.check("A04 version in index", "version" in d)
-    r.check("A05 service name correct", d.get("service") == "droply-relay")
+    r.check("A05 version in api/info", "version" in d)
+    r.check("A05b service name correct", d.get("service") == "droply-relay")
+
+    # Page routes
+    resp = r.get("/send")
+    r.check("A05c /send page loads", resp.status_code == 200)
+    resp = r.get("/receive")
+    r.check("A05d /receive page loads", resp.status_code == 200)
+
+    # QR endpoint
+    resp = r.get("/api/qr?url=http://test.local:8765")
+    r.check("A05e /api/qr returns 200", resp.status_code == 200)
+    r.check("A05f /api/qr has qr field", "qr" in resp.json())
 
     # CORS headers
     resp = r.get("/health")

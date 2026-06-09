@@ -81,3 +81,29 @@ $RECYCLE.BIN/
 htmlcov/
 .coverage
 coverage.xml
+# droply relay .gitignore
+
+# secrets — NEVER commit
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Runtime
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini

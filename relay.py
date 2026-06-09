@@ -742,10 +742,40 @@ if HAS_SOCK:
                 ws_sessions.get(session_id, set()).discard(ws)
             log.info(f"WS receiver left {session_id[:8]}…")
 
+# ── Page routes (serve the sender/receiver HTML UI) ──────────────────────────
+
+@app.route("/send")
+@app.route("/relay-send.html")
+def relay_send():
+    """Sender UI — create session, upload encrypted files."""
+    return render_template("relay_send.html")
+
+@app.route("/receive")
+@app.route("/relay-receive.html")
+def relay_receive():
+    """Receiver UI — enter PIN, download files."""
+    return render_template("relay_receive.html")
+
+# Serve relay_client.js from static/
+@app.route("/relay_client.js")
+def relay_client_js():
+    from flask import send_from_directory
+    return send_from_directory(
+        str(Path(__file__).parent / "static"),
+        "relay_client.js",
+        mimetype="application/javascript"
+    )
+
 # ── Health / info ─────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
+    """Root → redirect to sender UI."""
+    from flask import redirect as _redirect
+    return _redirect("/send")
+
+@app.route("/api/info")
+def api_info():
     active = len([k for k in store.keys("relay:session:*")])
     return jsonify({
         "service":    "droply-relay",
@@ -755,6 +785,32 @@ def index():
         "storage":    "redis" if isinstance(store, RedisStore) else "memory",
         "ws":         HAS_SOCK,
     }), 200
+
+@app.route("/api/qr")
+def api_qr():
+    """
+    Generate a QR code PNG as a base64 data-URI for a given URL.
+    WHY: Keeps QR generation server-side so no external API call needed —
+         works fully offline on the local network.
+    """
+    url = request.args.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "url param required"}), 400
+    try:
+        import qrcode, base64
+        from io import BytesIO
+        qr = qrcode.QRCode(box_size=6, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#0a0a0f", back_color="white")
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        return jsonify({"qr": f"data:image/png;base64,{b64}"})
+    except ImportError:
+        return jsonify({"qr": "", "error": "qrcode not installed"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/health")
 def health():
@@ -810,10 +866,13 @@ def run_tests():
     r = sess.get(f"{BASE}/health")
     chk("T01 health ok", r.status_code == 200)
 
-    # T02: index
-    r = sess.get(f"{BASE}/")
-    chk("T02 index ok", r.status_code == 200)
-    chk("T03 version in index", r.json().get("version") == VERSION)
+    # T02: index redirects to /send
+    r = sess.get(f"{BASE}/", allow_redirects=False)
+    chk("T02 index redirects", r.status_code in (301,302))
+
+    r = sess.get(f"{BASE}/api/info")
+    chk("T03 api/info ok", r.status_code == 200)
+    chk("T03b version in api/info", r.json().get("version") == VERSION)
 
     # T04: create session
     r = sess.post(f"{BASE}/relay/session", json={})
@@ -970,7 +1029,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=f"droply relay {VERSION}")
     parser.add_argument("--dev",    action="store_true",
                         help="Dev mode: in-memory storage, no Redis needed")
-    parser.add_argument("--port",   type=int, default=6000)
+    parser.add_argument("--port",   type=int, default=8765)
     parser.add_argument("--host",   type=str, default="0.0.0.0")
     parser.add_argument("--test",   action="store_true",
                         help="Run test suite and exit")
@@ -983,16 +1042,32 @@ if __name__ == "__main__":
         run_tests()
 
     PORT = args.port
-    ip   = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    os.environ["PORT"] = str(PORT)
 
-    print("\n" + "═"*60)
+    # Detect LAN IP so banner shows shareable address
+    import socket as _sock
+    try:
+        _s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+        _s.connect(("8.8.8.8", 80))
+        LAN_IP = _s.getsockname()[0]
+        _s.close()
+    except Exception:
+        LAN_IP = "127.0.0.1"
+
+    print("\n" + "═"*62)
     print(f"  droply relay {VERSION}")
-    print("═"*60)
-    print(f"  URL      : http://{ip}:{PORT}")
-    print(f"  Storage  : {'Redis (' + REDIS_URL + ')' if not DEV_MODE else 'in-memory (dev)'}")
-    print(f"  WS push  : {'yes' if HAS_SOCK else 'no (pip install flask-sock)'}")
-    print(f"  Session  : {SESSION_TTL_SEC//3600}h TTL")
-    print(f"  Max file : {MAX_FILE_SIZE//(1024**3)}GB")
-    print("═"*60 + "\n")
+    print("═"*62)
+    print(f"  Local   : http://127.0.0.1:{PORT}/send")
+    print(f"  Network : http://{LAN_IP}:{PORT}/send  ← share with other devices")
+    print(f"  Storage : {'Redis (' + REDIS_URL + ')' if not DEV_MODE else 'in-memory (dev mode)'}")
+    print(f"  WS push : {'yes' if HAS_SOCK else 'no (pip install flask-sock)'}")
+    print(f"  Session : {SESSION_TTL_SEC//3600}h TTL  |  Max file: {MAX_FILE_SIZE//(1024**3)}GB")
+    print("═"*62 + "\n")
 
-    app.run(host=args.host, port=PORT, threaded=True, debug=DEV_MODE)
+    app.run(
+        host=args.host,
+        port=PORT,
+        threaded=True,
+        debug=False,        # never True — causes reloader double-init crash
+        use_reloader=False,
+    )
