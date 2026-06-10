@@ -1,34 +1,28 @@
 # render.yaml — droply relay on Render (free tier)
 #
-# Deploy:
-#   1. Push this repo to GitHub
-#   2. Connect repo in render.com dashboard
-#   3. Set env vars: RELAY_SECRET, REDIS_URL
-#   4. Deploy
+# IMPORTANT: Render removed free Redis in 2024.
+# This config uses in-memory storage which is fine for testing.
+# For production with persistence, add a paid Redis or use Upstash free tier.
 #
-# Free Redis: Render has a free Redis tier (50 MB) — enough for ~2000 active sessions
+# Deploy steps:
+#   1. Push droply_relay/ folder to GitHub
+#   2. render.com → New → Web Service → connect repo
+#   3. Render reads this file automatically
+#   4. Set RELAY_SECRET env var (or let Render generate it)
+#   5. Deploy
 
 services:
   - type: web
     name: droply-relay
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn relay:app --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread --threads 4 --timeout 120
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 4 --timeout 120 --log-level info
     envVars:
       - key: RELAY_SECRET
-        generateValue: true        # Render auto-generates a secure random value
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: droply-cache
-          property: connectionString
+        generateValue: true
       - key: SESSION_TTL_SEC
         value: "7200"
       - key: MAX_FILE_SIZE
-        value: "5368709120"
+        value: "2147483648"
     healthCheckPath: /health
-
-  - type: redis
-    name: droply-cache
     plan: free
-    maxmemoryPolicy: allkeys-lru

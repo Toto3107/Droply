@@ -260,15 +260,21 @@ class RedisStore:
 
 
 def _init_store() -> MemoryStore | RedisStore:
-    if HAS_REDIS and not DEV_MODE:
+    """
+    Pick storage backend.
+    - If REDIS_URL env var is set and redis package installed → use Redis
+    - Otherwise → in-memory (fine for single-worker testing / free tier)
+    """
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if HAS_REDIS and redis_url and not DEV_MODE:
         try:
-            s = RedisStore(REDIS_URL)
+            s = RedisStore(redis_url)
             s._r.ping()
-            log.info(f"Redis connected: {REDIS_URL}")
+            log.info(f"Storage: Redis ({redis_url[:30]}…)")
             return s
         except Exception as e:
-            log.warning(f"Redis unavailable ({e}) — falling back to memory store")
-    log.info("Using in-memory store (dev mode or Redis unavailable)")
+            log.warning(f"Redis ping failed ({e}) — using in-memory storage")
+    log.info("Storage: in-memory (sessions lost on restart)")
     return MemoryStore()
 
 

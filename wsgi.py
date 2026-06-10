@@ -1,20 +1,16 @@
-# wsgi.py — production entry point
-# Gunicorn picks this up automatically: gunicorn wsgi:app
-# Also works with: gunicorn relay:app
+# wsgi.py — production entry point for gunicorn
+# Usage: gunicorn wsgi:app
 #
-# WHY a separate wsgi.py:
-#   relay.py has a __main__ block that parses CLI args.
-#   When gunicorn imports relay.py as a module those args don't run,
-#   but the module-level code (Flask app, store init) still needs to execute.
-#   This file ensures the store is initialised with env var config
-#   before gunicorn starts serving requests.
+# This file initialises the storage backend before gunicorn starts
+# serving requests. relay.py's __main__ block (argparse / startup banner)
+# does NOT run when imported as a module — only the Flask app and
+# module-level code executes.
 
 import os
-from relay import app, _init_store, DEV_MODE
-
-# Initialise storage once at import time (gunicorn worker startup)
 import relay as _relay
-_relay.store = _init_store()
 
-# Export app for gunicorn
-__all__ = ["app"]
+# Initialise storage using env vars (Redis if REDIS_URL set, else memory)
+_relay.store = _relay._init_store()
+
+# The Flask app gunicorn serves
+app = _relay.app
