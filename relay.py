@@ -109,6 +109,8 @@ try:
 except ImportError:
     HAS_SOCK = False
 
+# Redis is optional — only used if both installed AND REDIS_URL env var is set
+# DO NOT add redis to requirements.txt unless you have a Redis server ready
 try:
     import redis as redis_lib
     HAS_REDIS = True

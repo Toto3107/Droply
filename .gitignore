@@ -1,103 +1,15 @@
-# ── droply .gitignore ─────────────────────────────────────────────────────────
-new.py
-# Security — NEVER commit these
-cert.pem
-key.pem
-*.pem
-*.key
-*.p12
-*.pfx
-
-# Runtime state — generated on every run
-file_meta.json
-uploads/
-logs/
-
-# Keep the folder structure but not contents
-!uploads/.gitkeep
-!logs/.gitkeep
-
-# Python
+# Python - IMPORTANT: never commit these
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-.Python
-*.egg
 *.egg-info/
-dist/
-build/
-eggs/
-parts/
-var/
-sdist/
-develop-eggs/
-.installed.cfg
-lib/
-lib64/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.manifest
-*.spec
+.Python
 
-# Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-.python-version
-
-# PyInstaller builds
-/dist
-/build
-*.exe
-*.app
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
-# OS
-.DS_Store
-.AppleDouble
-.LSOverride
-Desktop.ini
-$RECYCLE.BIN/
-
-# Test artifacts
-/tmp/
-*.tmp
-*.log
-.pytest_cache/
-htmlcov/
-.coverage
-coverage.xml
-# droply relay .gitignore
-
-# secrets — NEVER commit
+# Secrets
 .env
 *.pem
 *.key
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
-env/
 
 # Runtime
 logs/
@@ -107,3 +19,17 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+*[Zz]one.[Ii]dentifier
+.identifier
+
+# Venv
+.venv/
+venv/
+env/
+build/
+dist/
+*.spec
+uploads/
+!uploads/.gitkeep
+file_meta.json
