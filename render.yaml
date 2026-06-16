@@ -16,7 +16,7 @@ services:
     name: droply-relay
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 4 --timeout 120 --log-level info
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 8 --timeout 120 --log-level info
     envVars:
       - key: RELAY_SECRET
         generateValue: true

@@ -281,7 +281,15 @@ def _init_store() -> MemoryStore | RedisStore:
 
 
 DEV_MODE = False   # set by --dev flag
-store: MemoryStore | RedisStore = None   # initialised in main()
+
+# ── Store initialisation ──────────────────────────────────────────────────────
+# WHY initialise here and not in main():
+#   Gunicorn imports this module in the master process, then forks workers.
+#   If store = None here, every worker starts with None and crashes on first
+#   request. Initialising at module level means every worker inherits a
+#   working store from the moment it starts.
+#   _init_store() checks REDIS_URL env var — safe to call at import time.
+store: MemoryStore | RedisStore = _init_store()
 
 # ── Key helpers ───────────────────────────────────────────────────────────────
 

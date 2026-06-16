@@ -1,16 +1,7 @@
-# wsgi.py — production entry point for gunicorn
-# Usage: gunicorn wsgi:app
+# wsgi.py — gunicorn entry point
 #
-# This file initialises the storage backend before gunicorn starts
-# serving requests. relay.py's __main__ block (argparse / startup banner)
-# does NOT run when imported as a module — only the Flask app and
-# module-level code executes.
+# relay.py now initialises `store` at module level (not in main()),
+# so every gunicorn worker gets a working store the moment it imports this.
+# No extra init needed here — just expose the app.
 
-import os
-import relay as _relay
-
-# Initialise storage using env vars (Redis if REDIS_URL set, else memory)
-_relay.store = _relay._init_store()
-
-# The Flask app gunicorn serves
-app = _relay.app
+from relay import app  # noqa: F401  

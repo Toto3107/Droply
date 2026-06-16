@@ -56,9 +56,10 @@ check("cryptography present","cryptography" in req.lower())
 print("\n  Import check (what gunicorn does)")
 try:
     import wsgi as _wsgi
+    import relay as _relay_mod
     check("wsgi.py imports OK", True)
     check("wsgi.app is Flask app", hasattr(_wsgi.app, "route"))
-    check("store initialised",    _wsgi._relay.store is not None)
+    check("store initialised", _relay_mod.store is not None)
 except Exception as e:
     check("wsgi.py imports OK", False, str(e))
     check("wsgi.app is Flask app", False, "skipped")
