@@ -182,15 +182,11 @@ def handle_options():
 # ── Storage backend ───────────────────────────────────────────────────────────
 
 class MemoryStore:
-    """
-    In-memory storage for local dev / testing.
-    WHY: Lets the relay run without Redis so you can develop and test locally.
-    NOT for production: data is lost on restart and not shared across workers.
-    """
+    """In-memory store — used in DEV_MODE / unit tests only."""
     def __init__(self):
         self._data: dict = {}
         self._expiry: dict = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()   # RLock prevents deadlock on re-entry
 
     def set(self, key: str, value: bytes, ttl: int = None):
         with self._lock:
@@ -201,18 +197,15 @@ class MemoryStore:
     def get(self, key: str) -> bytes | None:
         with self._lock:
             if key in self._expiry and time.time() > self._expiry[key]:
-                self._data.pop(key, None)
-                self._expiry.pop(key, None)
+                self._data.pop(key, None); self._expiry.pop(key, None)
                 return None
             return self._data.get(key)
 
     def delete(self, key: str):
         with self._lock:
-            self._data.pop(key, None)
-            self._expiry.pop(key, None)
+            self._data.pop(key, None); self._expiry.pop(key, None)
 
     def keys(self, pattern: str) -> list[str]:
-        """Glob-style prefix match (only * wildcard supported)."""
         prefix = pattern.rstrip("*")
         with self._lock:
             now = time.time()
@@ -227,6 +220,97 @@ class MemoryStore:
         with self._lock:
             if key in self._data:
                 self._expiry[key] = time.time() + ttl
+
+
+class DiskStore:
+    """
+    Disk-backed store — survives gunicorn worker restarts.
+    WHY: Render free tier restarts workers periodically. MemoryStore loses all
+         sessions on restart. DiskStore writes each key as a file in /tmp
+         so sessions survive across restarts within the same instance lifetime.
+    Storage: /tmp/droply_store/ (or DATA_DIR env var)
+    Format:  one file per key, binary content, sidecar .ttl for expiry.
+    Thread-safe: RLock (reentrant) prevents deadlock when set() is called
+                 from within a lock context.
+    """
+    def __init__(self, base_dir: str = ""):
+        self._base = Path(base_dir or os.environ.get("DATA_DIR", "/tmp/droply_store"))
+        self._base.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()   # RLock prevents deadlock on re-entry
+        log.info(f"DiskStore: {self._base}")
+
+    def _path(self, key: str) -> Path:
+        # sanitise key to safe filename
+        safe = key.replace(":", "__").replace("/", "_").replace(" ", "_")
+        return self._base / safe
+
+    def _is_expired(self, key: str) -> bool:
+        ttl_file = Path(str(self._path(key)) + ".ttl")
+        if ttl_file.exists():
+            try:
+                expire_at = float(ttl_file.read_text())
+                if time.time() > expire_at:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def set(self, key: str, value: bytes, ttl: int = None):
+        p = self._path(key)
+        if isinstance(value, str):
+            value = value.encode()
+        p.write_bytes(value)
+        ttl_file = Path(str(p) + ".ttl")
+        if ttl:
+            ttl_file.write_text(str(time.time() + ttl))
+        elif ttl_file.exists():
+            ttl_file.unlink()
+
+    def get(self, key: str) -> bytes | None:
+        if self._is_expired(key):
+            self.delete(key)
+            return None
+        p = self._path(key)
+        if p.exists():
+            try:
+                return p.read_bytes()
+            except Exception:
+                return None
+        return None
+
+    def delete(self, key: str):
+        p = self._path(key)
+        for f in [p, Path(str(p) + ".ttl")]:
+            try:
+                if f.exists(): f.unlink()
+            except Exception:
+                pass
+
+    def keys(self, pattern: str) -> list[str]:
+        prefix = pattern.rstrip("*").replace(":", "__").replace("/", "_")
+        result = []
+        try:
+            for f in self._base.iterdir():
+                name = f.name
+                if name.endswith(".ttl"):
+                    continue
+                if name.startswith(prefix):
+                    # Convert back to original key format
+                    orig = name.replace("__", ":").replace("_relay:", "relay:")
+                    if not self._is_expired(name.replace("__",":").replace("_relay:","relay:")):
+                        result.append(orig)
+        except Exception:
+            pass
+        return result
+
+    def exists(self, key: str) -> bool:
+        return self.get(key) is not None
+
+    def expire(self, key: str, ttl: int):
+        p = self._path(key)
+        if p.exists():
+            ttl_file = Path(str(p) + ".ttl")
+            ttl_file.write_text(str(time.time() + ttl))
 
 
 class RedisStore:
@@ -261,35 +345,33 @@ class RedisStore:
         self._r.expire(key, ttl)
 
 
-def _init_store() -> MemoryStore | RedisStore:
+# ── DEV_MODE must be declared BEFORE _init_store() ──────────────────────────
+DEV_MODE = os.environ.get("DROPLY_DEV", "").lower() in ("1", "true", "yes")
+
+def _init_store():
     """
-    Pick storage backend.
-    - If REDIS_URL env var is set and redis package installed → use Redis
-    - Otherwise → in-memory (fine for single-worker testing / free tier)
+    Pick storage backend (priority order):
+    1. Redis  — if REDIS_URL env var set and redis package installed
+    2. Memory — if DEV_MODE (unit tests only)
+    3. Disk   — default for production (survives Render restarts, no extra setup)
     """
     redis_url = os.environ.get("REDIS_URL", "").strip()
-    if HAS_REDIS and redis_url and not DEV_MODE:
+    if HAS_REDIS and redis_url:
         try:
             s = RedisStore(redis_url)
             s._r.ping()
             log.info(f"Storage: Redis ({redis_url[:30]}…)")
             return s
         except Exception as e:
-            log.warning(f"Redis ping failed ({e}) — using in-memory storage")
-    log.info("Storage: in-memory (sessions lost on restart)")
-    return MemoryStore()
+            log.warning(f"Redis ping failed ({e}) — falling back to disk store")
+    if DEV_MODE:
+        log.info("Storage: in-memory (DEV_MODE — data lost on restart)")
+        return MemoryStore()
+    log.info("Storage: DiskStore (/tmp/droply_store) — survives Render restarts")
+    return DiskStore()
 
-
-DEV_MODE = False   # set by --dev flag
-
-# ── Store initialisation ──────────────────────────────────────────────────────
-# WHY initialise here and not in main():
-#   Gunicorn imports this module in the master process, then forks workers.
-#   If store = None here, every worker starts with None and crashes on first
-#   request. Initialising at module level means every worker inherits a
-#   working store from the moment it starts.
-#   _init_store() checks REDIS_URL env var — safe to call at import time.
-store: MemoryStore | RedisStore = _init_store()
+# ── Store: initialised at module level so every gunicorn worker has it ────────
+store: MemoryStore | DiskStore | RedisStore = _init_store()
 
 # ── Key helpers ───────────────────────────────────────────────────────────────
 
@@ -556,76 +638,74 @@ def upload_chunk():
     if not verify_hmac(session_id, mgmt_token):
         return jsonify({"error": "Invalid management token"}), 403
 
+    # Always re-read session fresh — critical for multi-chunk and multi-file
     sd = get_session_data(session_id)
     if not sd:
-        return jsonify({"error": "Session not found"}), 404
+        log.warning(f"Upload: session {session_id[:8]}… not found (expired or restarted?)")
+        return jsonify({"error": "Session not found or expired — create a new session"}), 404
 
     try:
         chunk_idx  = int(chunk_idx)
         total_chks = int(total_chks)
         file_size  = int(file_size)
     except ValueError:
-        return jsonify({"error": "Invalid chunk headers"}), 400
+        return jsonify({"error": "Invalid chunk index headers"}), 400
 
     if file_size > MAX_FILE_SIZE:
         return jsonify({"error": f"File too large (max {MAX_FILE_SIZE//(1024**3)}GB)"}), 413
 
-    if len(sd.get("files", {})) >= MAX_FILES_PER_SESSION and file_id not in sd.get("files", {}):
-        return jsonify({"error": "Session file limit reached"}), 429
+    sd_files = sd.get("files", {})
+    if len(sd_files) >= MAX_FILES_PER_SESSION and file_id not in sd_files:
+        return jsonify({"error": f"Session file limit ({MAX_FILES_PER_SESSION}) reached"}), 429
 
-    # Read raw ciphertext body
+    # Read ciphertext body
     ciphertext = request.get_data()
     if not ciphertext:
-        return jsonify({"error": "Empty body"}), 400
+        return jsonify({"error": "Empty body — no ciphertext received"}), 400
 
-    # Store ciphertext chunk in Redis/memory
+    # Store chunk
     ck = chunk_key(session_id, file_id, chunk_idx)
     store.set(ck, ciphertext, ttl=SESSION_TTL_SEC)
 
-    # Update file metadata in session
-    sd_files = sd.get("files", {})
+    # Upsert file metadata
+    safe_name = Path(file_name).name or "file"
     if file_id not in sd_files:
-        # Sanitise filename
-        safe_name = Path(file_name).name or "file"
         sd_files[file_id] = {
-            "name":             safe_name,
-            "size":             file_size,
-            "sha256":           file_sha,
-            "chunks_total":     total_chks,
-            "chunks_received":  0,
-            "created_at":       utcnow().isoformat(),
+            "name":            safe_name,
+            "size":            file_size,
+            "sha256":          file_sha,
+            "chunks_total":    total_chks,
+            "chunks_received": 0,
+            "created_at":      utcnow().isoformat(),
         }
-
+    # Always update total/size in case sender retries with corrected values
+    sd_files[file_id]["chunks_total"] = total_chks
     sd_files[file_id]["chunks_received"] = sd_files[file_id].get("chunks_received", 0) + 1
+
+    # Write session back atomically
     sd["files"] = sd_files
     store.set(session_key(session_id), json.dumps(sd).encode(), ttl=SESSION_TTL_SEC)
 
-    # When last chunk arrives, broadcast to waiting receivers
-    final_name = sd_files[file_id]["name"]   # always safe — set above or already existed
-    if sd_files[file_id]["chunks_received"] >= total_chks:
+    final_name   = sd_files[file_id]["name"]
+    chunks_done  = sd_files[file_id]["chunks_received"]
+    is_complete  = chunks_done >= total_chks
+
+    if is_complete:
         ws_broadcast(session_id, {
-            "event":   "file_complete",
-            "file_id": file_id,
-            "name":    final_name,
-            "size":    file_size,
-            "sha256":  file_sha,
+            "event": "file_complete", "file_id": file_id,
+            "name":  final_name, "size": file_size, "sha256": file_sha,
         })
-        log.info(f"File complete: {final_name} in session {session_id[:8]}…")
+        log.info(f"File complete: {final_name} ({file_size}B) in session {session_id[:8]}…")
     else:
-        # Intermediate progress push
         ws_broadcast(session_id, {
-            "event":   "chunk_received",
-            "file_id": file_id,
-            "chunk":   chunk_idx,
-            "total":   total_chks,
+            "event": "chunk_received", "file_id": file_id,
+            "chunk": chunk_idx, "total": total_chks,
         })
 
     return jsonify({
-        "ok":       True,
-        "file_id":  file_id,
-        "chunk":    chunk_idx,
-        "total":    total_chks,
-        "received": sd_files[file_id]["chunks_received"],
+        "ok": True, "file_id": file_id,
+        "chunk": chunk_idx, "total": total_chks,
+        "received": chunks_done, "complete": is_complete,
     }), 200
 
 
@@ -772,15 +852,22 @@ def relay_receive():
     """Receiver UI — enter PIN, download files."""
     return render_template("relay_receive.html")
 
-# Serve relay_client.js from static/
+# Serve relay_client.js — explicit route so it always works regardless of
+# how Flask's static_folder is configured. Path(__file__).parent ensures
+# it works both locally and on Render where the cwd may differ.
 @app.route("/relay_client.js")
 def relay_client_js():
-    from flask import send_from_directory
-    return send_from_directory(
-        str(Path(__file__).parent / "static"),
-        "relay_client.js",
-        mimetype="application/javascript"
-    )
+    static_dir = Path(__file__).parent / "static"
+    js_file    = static_dir / "relay_client.js"
+    if not js_file.exists():
+        log.error(f"relay_client.js not found at {js_file}")
+        return "// relay_client.js not found", 404, {"Content-Type":"application/javascript"}
+    content_js = js_file.read_text(encoding="utf-8")
+    return content_js, 200, {
+        "Content-Type": "application/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+        "Content-Length": str(len(content_js.encode("utf-8"))),
+    }
 
 # ── Health / info ─────────────────────────────────────────────────────────────
 
@@ -851,6 +938,7 @@ def run_tests():
     import io
 
     global DEV_MODE, store
+    os.environ["DROPLY_DEV"] = "1"   # triggers MemoryStore in _init_store
     DEV_MODE = True
     store    = _init_store()
 
