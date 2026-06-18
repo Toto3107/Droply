@@ -17,8 +17,11 @@ import threading
 PASS = "  ✅"
 FAIL = "  ❌"
 fails = []
+total = 0
 
 def check(name, ok, detail=""):
+    global total
+    total += 1
     if ok:
         print(f"{PASS} {name}")
     else:
@@ -106,6 +109,12 @@ check("/send has droply content", "droply" in r.text.lower())
 r = s.get(f"http://127.0.0.1:{PORT}/receive")
 check("/receive page loads", r.status_code == 200)
 
+r = s.get(f"http://127.0.0.1:{PORT}/relay-receive.html?s=test&p=123456", allow_redirects=False)
+check("/relay-receive.html redirects (not 404)", r.status_code == 301)
+
+r = s.get(f"http://127.0.0.1:{PORT}/relay-send.html", allow_redirects=False)
+check("/relay-send.html redirects (not 404)", r.status_code == 301)
+
 r = s.get(f"http://127.0.0.1:{PORT}/relay_client.js")
 check("/relay_client.js loads", r.status_code == 200)
 check("relay_client.js is JS", "DroplyRelay" in r.text)
@@ -132,8 +141,7 @@ check("__pycache__ in .gitignore",
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 print("\n" + "─"*54)
-total = len(fails) + (sum(1 for _ in range(1)))  # just use fails count
-passed = 25 - len(fails)   # approximate, based on number of checks above
+passed = total - len(fails)
 print(f"  {passed} checks passed   {len(fails)} failed")
 if fails:
     print(f"\n  Fix these before pushing:")

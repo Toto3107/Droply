@@ -852,6 +852,27 @@ def relay_receive():
     """Receiver UI — enter PIN, download files."""
     return render_template("relay_receive.html")
 
+# ── Legacy URL redirects ──────────────────────────────────────────────────────
+# WHY: An earlier version of this app used /relay-send.html and
+#      /relay-receive.html as the page URLs. Anyone with an old QR code,
+#      a bookmark, browser history, or a cached page from that version
+#      would hit a 404 forever without this. 301 permanent redirect
+#      preserves all query params (?s=...&p=...) so old QR codes that
+#      were already printed or shared keep working exactly as before.
+@app.route("/relay-receive.html")
+def legacy_receive_redirect():
+    from flask import redirect as _redirect
+    qs = request.query_string.decode()
+    target = "/receive" + (f"?{qs}" if qs else "")
+    return _redirect(target, code=301)
+
+@app.route("/relay-send.html")
+def legacy_send_redirect():
+    from flask import redirect as _redirect
+    qs = request.query_string.decode()
+    target = "/send" + (f"?{qs}" if qs else "")
+    return _redirect(target, code=301)
+
 @app.route("/relay/verify-session", methods=["POST"])
 @limiter.limit("30 per minute")
 def verify_session():

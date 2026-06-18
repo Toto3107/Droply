@@ -178,6 +178,19 @@ def section_a_infra(r: TestRunner):
     resp = r.post("/relay/verify-session", json={"session_id": sid})
     r.check("A05k verify-session missing pin 400", resp.status_code == 400)
 
+    # Legacy URL redirects — old QR codes / bookmarks from earlier deploys
+    # must never 404, they must permanently redirect to the new route
+    resp = r.get(f"/relay-receive.html?s={sid}&p={pin}", allow_redirects=False)
+    r.check("A05l legacy receive URL redirects 301", resp.status_code == 301)
+    r.check("A05m legacy redirect preserves query params",
+            f"s={sid}" in resp.headers.get("Location", "") and
+            f"p={pin}" in resp.headers.get("Location", ""))
+
+    resp = r.get("/relay-send.html", allow_redirects=False)
+    r.check("A05n legacy send URL redirects 301", resp.status_code == 301)
+    r.check("A05o legacy send redirects to /send",
+            resp.headers.get("Location", "").endswith("/send"))
+
     r.delete(f"/relay/session/{sid}", headers={"X-Mgmt-Token": mgmt})
 
     # CORS headers
