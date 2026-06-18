@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Droply — send files anywhere</title>
+<meta name="description" content="End-to-end encrypted file transfer. No account. No app.">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;--surface:#13131a;--surface2:#1a1a24;
+  --border:#1e1e2e;--border2:#2a2a3e;
+  --accent:#7c6aff;--accent2:#5b9dff;--text:#e8e6f0;--muted:#82808f;
+  --success:#4ade80;--mono:ui-monospace,'SF Mono',monospace;
+  --sans:-apple-system,system-ui,'Segoe UI',sans-serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);
+     min-height:100vh;display:flex;flex-direction:column;}
+body::before{content:'';position:fixed;inset:0;
+  background-image:radial-gradient(circle at 20% 20%,rgba(124,106,255,.07),transparent 50%),
+                   radial-gradient(circle at 80% 80%,rgba(91,157,255,.05),transparent 50%);
+  pointer-events:none;}
+
+header{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;
+       padding:1.25rem 2rem;}
+.logo{font-weight:700;font-size:17px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;}
+.logo-mark{width:9px;height:9px;border-radius:50%;background:var(--accent);
+           box-shadow:0 0 12px rgba(124,106,255,.6);}
+.nav-link{font-size:13px;color:var(--muted);text-decoration:none;padding:6px 12px;
+          border-radius:8px;transition:color .15s,background .15s;}
+.nav-link:hover{color:var(--text);background:var(--surface);}
+
+main{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;
+     align-items:center;justify-content:center;padding:2rem 1.5rem 4rem;}
+
+.hero{text-align:center;max-width:540px;margin-bottom:3rem;}
+.hero h1{font-size:2.1rem;font-weight:700;letter-spacing:-.02em;line-height:1.2;margin-bottom:.75rem;}
+.hero p{font-size:15px;color:var(--muted);line-height:1.6;}
+
+.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;width:100%;max-width:560px;}
+@media(max-width:560px){.mode-grid{grid-template-columns:1fr;}}
+
+.mode-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;
+           padding:2rem 1.5rem;text-align:center;cursor:pointer;text-decoration:none;color:var(--text);
+           transition:border-color .2s,transform .15s,background .2s;position:relative;overflow:hidden;}
+.mode-card:hover{border-color:var(--accent);transform:translateY(-2px);background:var(--surface2);}
+.mode-card:active{transform:translateY(0);}
+.mode-icon{width:56px;height:56px;border-radius:16px;display:flex;align-items:center;justify-content:center;
+           margin:0 auto 1.25rem;font-size:26px;}
+.mode-send .mode-icon{background:rgba(124,106,255,.12);}
+.mode-receive .mode-icon{background:rgba(74,222,128,.1);}
+.mode-card h2{font-size:1.05rem;font-weight:700;margin-bottom:.4rem;}
+.mode-card p{font-size:12.5px;color:var(--muted);line-height:1.55;}
+.mode-arrow{position:absolute;top:1.25rem;right:1.25rem;font-size:13px;color:var(--muted);
+            opacity:0;transition:opacity .15s,transform .15s;transform:translateX(-4px);}
+.mode-card:hover .mode-arrow{opacity:1;transform:translateX(0);}
+
+.trust-row{display:flex;gap:24px;justify-content:center;margin-top:2.5rem;flex-wrap:wrap;}
+.trust-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);}
+.trust-dot{width:5px;height:5px;border-radius:50%;background:var(--success);flex-shrink:0;}
+
+footer{position:relative;z-index:1;text-align:center;padding:1.5rem;font-size:11px;
+       color:var(--muted);font-family:var(--mono);}
+footer a{color:var(--muted);text-decoration:none;}
+footer a:hover{color:var(--text);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="logo-mark"></span>Droply</div>
+  <a href="/health" class="nav-link">Status</a>
+</header>
+
+<main>
+  <div class="hero">
+    <h1>Send files. Anywhere. Encrypted.</h1>
+    <p>No account, no app install, no size limits that matter. Files are encrypted in your browser before they ever leave your device.</p>
+  </div>
+
+  <div class="mode-grid">
+    <a href="/send" class="mode-card mode-send">
+      <span class="mode-arrow">→</span>
+      <div class="mode-icon">📤</div>
+      <h2>Send files</h2>
+      <p>Create a session, drop your files, share a PIN with the receiver.</p>
+    </a>
+    <a href="/receive" class="mode-card mode-receive">
+      <span class="mode-arrow">→</span>
+      <div class="mode-icon">📥</div>
+      <h2>Receive files</h2>
+      <p>Scan a QR code or enter a session ID and PIN to download.</p>
+    </a>
+  </div>
+
+  <div class="trust-row">
+    <div class="trust-item"><span class="trust-dot"></span>End-to-end encrypted</div>
+    <div class="trust-item"><span class="trust-dot"></span>Auto-deletes after 2 hours</div>
+    <div class="trust-item"><span class="trust-dot"></span>No account required</div>
+  </div>
+</main>
+
+<footer>
+  droply relay · <a href="/health">system status</a>
+</footer>
+
+</body>
+</html>

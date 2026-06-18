@@ -841,16 +841,42 @@ if HAS_SOCK:
 # ── Page routes (serve the sender/receiver HTML UI) ──────────────────────────
 
 @app.route("/send")
-@app.route("/relay-send.html")
+@limiter.limit("60 per hour")
 def relay_send():
     """Sender UI — create session, upload encrypted files."""
     return render_template("relay_send.html")
 
 @app.route("/receive")
-@app.route("/relay-receive.html")
+@limiter.limit("60 per hour")
 def relay_receive():
     """Receiver UI — enter PIN, download files."""
     return render_template("relay_receive.html")
+
+@app.route("/relay/verify-session", methods=["POST"])
+@limiter.limit("30 per minute")
+def verify_session():
+    """
+    Lightweight session-resume check.
+    WHY: When a receiver refreshes the page, the browser still has
+         session_id + pin in sessionStorage, but we need to confirm
+         the session is STILL valid on the server before skipping
+         straight to the file list — otherwise an expired session
+         would silently show a stale, broken file list.
+    Returns 200 if valid, 404/401 otherwise — same checks as /relay/join
+    but without re-logging a "joined" event, since this is a resume,
+    not a fresh join.
+    """
+    data       = request.get_json(silent=True) or {}
+    session_id = data.get("session_id", "").strip()
+    pin        = data.get("pin", "").strip()
+    if not session_id or not pin:
+        return jsonify({"valid": False, "error": "Missing session_id or pin"}), 400
+    sd = get_session_data(session_id)
+    if not sd:
+        return jsonify({"valid": False, "error": "Session expired"}), 404
+    if not verify_pin(sd, pin):
+        return jsonify({"valid": False, "error": "Wrong PIN"}), 401
+    return jsonify({"valid": True, "expires_at": sd["expires_at"]}), 200
 
 # Serve relay_client.js — explicit route so it always works regardless of
 # how Flask's static_folder is configured. Path(__file__).parent ensures
@@ -873,9 +899,8 @@ def relay_client_js():
 
 @app.route("/")
 def index():
-    """Root → redirect to sender UI."""
-    from flask import redirect as _redirect
-    return _redirect("/send")
+    """Landing page — choose send or receive."""
+    return render_template("relay_landing.html")
 
 @app.route("/api/info")
 def api_info():
@@ -970,9 +995,11 @@ def run_tests():
     r = sess.get(f"{BASE}/health")
     chk("T01 health ok", r.status_code == 200)
 
-    # T02: index redirects to /send
+    # T02: index renders the landing page (mode chooser), no longer a redirect
     r = sess.get(f"{BASE}/", allow_redirects=False)
-    chk("T02 index redirects", r.status_code in (301,302))
+    chk("T02 index renders landing page", r.status_code == 200)
+    chk("T02b landing has send link", "/send" in r.text)
+    chk("T02c landing has receive link", "/receive" in r.text)
 
     r = sess.get(f"{BASE}/api/info")
     chk("T03 api/info ok", r.status_code == 200)

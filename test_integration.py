@@ -144,7 +144,7 @@ def section_a_infra(r: TestRunner):
     r.check("A02 /health ok=true", resp.json().get("ok") is True)
 
     resp = r.get("/", allow_redirects=False)
-    r.check("A03 root redirects to /send", resp.status_code in (301, 302))
+    r.check("A03 root renders landing page", resp.status_code == 200)
 
     resp = r.get("/api/info")
     r.check("A04 /api/info returns 200", resp.status_code == 200)
@@ -162,6 +162,23 @@ def section_a_infra(r: TestRunner):
     resp = r.get("/api/qr?url=http://test.local:8765")
     r.check("A05e /api/qr returns 200", resp.status_code == 200)
     r.check("A05f /api/qr has qr field", "qr" in resp.json())
+
+    # verify-session endpoint (session resume support)
+    sid, pin, mgmt = make_session(r)
+    resp = r.post("/relay/verify-session", json={"session_id": sid, "pin": pin})
+    r.check("A05g verify-session valid returns 200", resp.status_code == 200)
+    r.check("A05h verify-session valid=true", resp.json().get("valid") is True)
+
+    resp = r.post("/relay/verify-session", json={"session_id": sid, "pin": "000000"})
+    r.check("A05i verify-session wrong pin 401", resp.status_code == 401)
+
+    resp = r.post("/relay/verify-session", json={"session_id": "nope", "pin": pin})
+    r.check("A05j verify-session bad session 404", resp.status_code == 404)
+
+    resp = r.post("/relay/verify-session", json={"session_id": sid})
+    r.check("A05k verify-session missing pin 400", resp.status_code == 400)
+
+    r.delete(f"/relay/session/{sid}", headers={"X-Mgmt-Token": mgmt})
 
     # CORS headers
     resp = r.get("/health")

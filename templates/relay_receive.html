@@ -275,12 +275,40 @@ document.addEventListener('paste',e=>{
   tryAutoJoin();
 });
 
-// Pre-fill session ID from URL param ?s=...
-const urlParams=new URLSearchParams(location.search);
-if(urlParams.has('s')){
-  document.getElementById('session-input').value=urlParams.get('s');
-  setTimeout(()=>digits[0].focus(),100);
-}
+// ── Page boot sequence ───────────────────────────────────────────────────────
+// Priority order:
+//   1. Resume an already-joined session from sessionStorage (handles reload)
+//   2. Otherwise, auto-fill + auto-join from QR scan URL params (?s=&p=)
+//   3. Otherwise, show the empty join form
+(async function bootReceivePage(){
+  const resumed = await tryResumeSession();
+  if(resumed) return;   // already showing the file list, nothing more to do
+
+  const urlParams = new URLSearchParams(location.search);
+  if(!urlParams.has('s') && !urlParams.has('p')) return;   // nothing to autofill
+
+  const sid = urlParams.get('s') || '';
+  const pin = urlParams.get('p') || '';
+
+  if(sid){
+    document.getElementById('session-input').value = sid;
+  }
+
+  if(pin && pin.length === 6 && /^\d{6}$/.test(pin)){
+    digits.forEach((d, i) => {
+      d.value = pin[i] || '';
+      d.classList.toggle('filled', !!pin[i]);
+    });
+    syncPin();
+  }
+
+  // Auto-join if BOTH are present — scanning the QR is the whole interaction
+  if(sid && pin && pin.length === 6){
+    setTimeout(() => { document.getElementById('btn-join').click(); }, 400);
+  } else if(sid) {
+    setTimeout(() => digits[0].focus(), 100);
+  }
+})();
 
 // ── Join session ──────────────────────────────────────────────────────────────
 async function joinSession(){
@@ -300,6 +328,13 @@ async function joinSession(){
     SESSION_ID=sid;
     CURRENT_PIN=pinValue;
 
+    // Persist to sessionStorage so a page reload doesn't lose the session.
+    // WHY sessionStorage not localStorage: it clears when the tab closes,
+    // which matches the relay's own session lifetime model — you don't
+    // want a stale PIN sitting around forever on a shared device.
+    sessionStorage.setItem('droply_session_id', sid);
+    sessionStorage.setItem('droply_pin', pinValue);
+
     document.getElementById('disp-session').textContent=sid.slice(0,8)+'…';
     document.getElementById('disp-expires').textContent=
       new Date(data.expires_at+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
@@ -317,6 +352,43 @@ async function joinSession(){
                       `Error: ${e.message}`;
     errEl.style.display='block';
     btn.disabled=false;btn.textContent='Connect →';
+    // Clear any stale stored session on failure
+    sessionStorage.removeItem('droply_session_id');
+    sessionStorage.removeItem('droply_pin');
+  }
+}
+
+// ── Resume a session after page reload ─────────────────────────────────────
+// WHY: Without this, hitting refresh while viewing the file list drops the
+// receiver back to the empty PIN-entry screen even though their session is
+// still valid server-side. We check sessionStorage first, verify with the
+// server (in case it expired while the tab was open), then auto-join.
+async function tryResumeSession(){
+  const savedSid = sessionStorage.getItem('droply_session_id');
+  const savedPin = sessionStorage.getItem('droply_pin');
+  if(!savedSid || !savedPin) return false;
+
+  try{
+    const verifyResp = await fetch('/relay/verify-session', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({session_id: savedSid, pin: savedPin})
+    });
+    const verifyData = await verifyResp.json();
+    if(!verifyResp.ok || !verifyData.valid){
+      sessionStorage.removeItem('droply_session_id');
+      sessionStorage.removeItem('droply_pin');
+      return false;
+    }
+
+    // Valid — silently fill fields and join properly to get the file list
+    document.getElementById('session-input').value = savedSid;
+    digits.forEach((d,i)=>{ d.value=savedPin[i]||''; d.classList.toggle('filled',!!savedPin[i]); });
+    syncPin();
+    await joinSession();
+    return true;
+  }catch(e){
+    return false;
   }
 }
 

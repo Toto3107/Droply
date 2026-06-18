@@ -36,6 +36,7 @@ required = [
     "Procfile", "render.yaml",
     "templates/relay_send.html",
     "templates/relay_receive.html",
+    "templates/relay_landing.html",
     "static/relay_client.js",
 ]
 for f in required:
@@ -70,8 +71,8 @@ print("\n  Redis isolation")
 import relay as _relay
 check("relay imports without Redis server", True)
 check("HAS_REDIS=False without package", not _relay.HAS_REDIS or True)  # either is fine
-check("store is MemoryStore (no Redis URL set)",
-      isinstance(_relay.store, _relay.MemoryStore))
+check("store is DiskStore or MemoryStore",
+      isinstance(_relay.store, (_relay.DiskStore, _relay.MemoryStore)))
 
 # ── 5. Key routes respond ────────────────────────────────────────────────────
 print("\n  Route smoke test")
@@ -96,7 +97,7 @@ check("/health → 200", r.status_code == 200)
 check("/health returns ok=true", r.json().get("ok") is True)
 
 r = s.get(f"http://127.0.0.1:{PORT}/", allow_redirects=False)
-check("/ redirects to /send", r.status_code in (301, 302))
+check("/ renders landing page", r.status_code == 200)
 
 r = s.get(f"http://127.0.0.1:{PORT}/send")
 check("/send page loads", r.status_code == 200)
